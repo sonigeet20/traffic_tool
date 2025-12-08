@@ -1,0 +1,60 @@
+=====================================================
+ COPY AND PASTE THESE COMMANDS TO FIX THE ISSUE
+=====================================================
+
+1. Upload the fixed file:
+-----------------------------------------------------
+cd /tmp/cc-agent/60507420/project && scp puppeteer-server.js ubuntu@13.218.100.97:~/puppeteer-server/server.js
+
+
+2. Restart the server:
+-----------------------------------------------------
+ssh ubuntu@13.218.100.97 "cd ~/puppeteer-server && pm2 restart server && pm2 status"
+
+
+3. Watch logs for 30 seconds:
+-----------------------------------------------------
+ssh ubuntu@13.218.100.97 "timeout 30 pm2 logs server --lines 0"
+
+
+4. Check if fix worked (after 5 minutes):
+-----------------------------------------------------
+ssh ubuntu@13.218.100.97 "pm2 logs server --lines 50 | grep -E '(completed|success|screenshot)'"
+
+
+=====================================================
+ WHAT WAS FIXED
+=====================================================
+
+✅ Browser launch timeout: 2 min → 5 min
+✅ All navigation timeouts: 2 min → 5 min
+✅ Selector wait timeout: 30 sec → 60 sec
+
+WHY: Sessions were timing out before completing
+     because they ran longer than 2 minutes with
+     proxy delays + search flow + wait duration
+
+NOW: Sessions have 5 minutes to complete, which is
+     plenty of time for even the longest sessions
+     (120s duration + proxy + search = ~150s max)
+
+=====================================================
+ VERIFY IT'S WORKING
+=====================================================
+
+After deployment, go to your Supabase SQL Editor and run:
+
+SELECT
+  status,
+  COUNT(*) as count,
+  ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - started_at))), 1) as avg_seconds
+FROM bot_sessions
+WHERE created_at > NOW() - INTERVAL '15 minutes'
+GROUP BY status;
+
+YOU SHOULD SEE:
+- "completed" status with growing count
+- "running" status with LOW count (<10)
+- Average duration 30-120 seconds
+
+=====================================================

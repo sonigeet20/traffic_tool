@@ -1,0 +1,49 @@
+# CRITICAL: Deploy Puppeteer Fix Now
+
+## What Changed
+
+**Changed `waitUntil` from `networkidle2` to `domcontentloaded`**
+
+WHY: `networkidle2` waits for network to be completely idle (no requests for 500ms). With analytics scripts like Clarity, Google Analytics, etc. constantly pinging, the network NEVER becomes idle, causing indefinite hangs!
+
+`domcontentloaded` returns as soon as the DOM is ready, then we manually wait 2-3 seconds for analytics to initialize.
+
+## Changes Made:
+1. ✅ All navigation timeouts: 2min → 5min
+2. ✅ Wait strategy: `networkidle2` → `domcontentloaded` + manual 3s wait
+3. ✅ Browser launch timeout: 2min → 5min
+
+## Deploy Commands
+
+### 1. Upload the file
+cd /tmp/cc-agent/60507420/project
+scp puppeteer-server.js ubuntu@13.218.100.97:~/puppeteer-server/server.js
+
+### 2. Restart server
+ssh ubuntu@13.218.100.97 "cd ~/puppeteer-server && pm2 restart server && pm2 logs server --lines 20"
+
+### 3. Verify deployment (on remote server)
+ssh ubuntu@13.218.100.97
+grep "domcontentloaded" ~/puppeteer-server/server.js | head -3
+
+Should show lines with `domcontentloaded`
+
+## Test It
+
+After 2-3 minutes, run in Supabase SQL Editor:
+
+SELECT status, COUNT(*) as count
+FROM bot_sessions
+WHERE created_at > NOW() - INTERVAL '10 minutes'
+GROUP BY status;
+
+YOU MUST SEE:
+- ✅ `completed` status with sessions
+- ✅ NOT all sessions stuck as `running`
+
+## If Still Not Working
+
+Run on your server:
+ssh ubuntu@13.218.100.97 "pm2 logs server --err --lines 50"
+
+Look for actual error messages.
