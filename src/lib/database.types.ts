@@ -1,363 +1,168 @@
+// Minimal Supabase types used in the app (campaigns, journeys, plugins, sessions)
 export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+	| string
+	| number
+	| boolean
+	| null
+	| { [key: string]: Json | undefined }
+	| Json[];
 
-export interface Database {
-  public: {
-    Tables: {
-      campaigns: {
-        Row: {
-          id: string
-          user_id: string
-          name: string
-          target_url: string
-          status: 'draft' | 'active' | 'paused' | 'completed'
-          total_sessions: number
-          concurrent_bots: number
-          session_duration_min: number
-          session_duration_max: number
-          target_geo_locations: string[]
-          use_residential_proxies: boolean
-          proxy_provider: string
-          proxy_username: string | null
-          proxy_password: string | null
-          proxy_host: string | null
-          proxy_port: string | null
-          total_users: number
-          distribution_period_hours: number
-          distribution_pattern: 'uniform' | 'spike' | 'gradual_increase' | 'random'
-          sessions_per_hour: number
-          traffic_source_distribution: { direct: number; search: number }
-          search_keywords: string[]
-          created_at: string
-          updated_at: string
-          started_at: string | null
-          completed_at: string | null
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          name: string
-          target_url: string
-          status?: 'draft' | 'active' | 'paused' | 'completed'
-          total_sessions?: number
-          concurrent_bots?: number
-          session_duration_min?: number
-          session_duration_max?: number
-          target_geo_locations?: string[]
-          use_residential_proxies?: boolean
-          proxy_provider?: string
-          proxy_username?: string | null
-          proxy_password?: string | null
-          proxy_host?: string | null
-          proxy_port?: string | null
-          total_users?: number
-          distribution_period_hours?: number
-          distribution_pattern?: 'uniform' | 'spike' | 'gradual_increase' | 'random'
-          sessions_per_hour?: number
-          traffic_source_distribution?: { direct: number; search: number }
-          search_keywords?: string[]
-          created_at?: string
-          updated_at?: string
-          started_at?: string | null
-          completed_at?: string | null
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          name?: string
-          target_url?: string
-          status?: 'draft' | 'active' | 'paused' | 'completed'
-          total_sessions?: number
-          concurrent_bots?: number
-          session_duration_min?: number
-          session_duration_max?: number
-          target_geo_locations?: string[]
-          use_residential_proxies?: boolean
-          proxy_provider?: string
-          proxy_username?: string | null
-          proxy_password?: string | null
-          proxy_host?: string | null
-          proxy_port?: string | null
-          total_users?: number
-          distribution_period_hours?: number
-          distribution_pattern?: 'uniform' | 'spike' | 'gradual_increase' | 'random'
-          sessions_per_hour?: number
-          traffic_source_distribution?: { direct: number; search: number }
-          search_keywords?: string[]
-          created_at?: string
-          updated_at?: string
-          started_at?: string | null
-          completed_at?: string | null
-        }
-      }
-      user_journeys: {
-        Row: {
-          id: string
-          campaign_id: string
-          step_order: number
-          action_type: 'navigate' | 'click' | 'scroll' | 'wait' | 'fill_form' | 'hover' | 'screenshot'
-          selector: string | null
-          value: string | null
-          wait_before: number
-          wait_after: number
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          campaign_id: string
-          step_order: number
-          action_type: 'navigate' | 'click' | 'scroll' | 'wait' | 'fill_form' | 'hover' | 'screenshot'
-          selector?: string | null
-          value?: string | null
-          wait_before?: number
-          wait_after?: number
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          campaign_id?: string
-          step_order?: number
-          action_type?: 'navigate' | 'click' | 'scroll' | 'wait' | 'fill_form' | 'hover' | 'screenshot'
-          selector?: string | null
-          value?: string | null
-          wait_before?: number
-          wait_after?: number
-          created_at?: string
-        }
-      }
-      bot_sessions: {
-        Row: {
-          id: string
-          campaign_id: string
-          status: 'pending' | 'running' | 'completed' | 'failed'
-          user_agent: string | null
-          viewport_width: number
-          viewport_height: number
-          started_at: string | null
-          completed_at: string | null
-          error_message: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          campaign_id: string
-          status?: 'pending' | 'running' | 'completed' | 'failed'
-          user_agent?: string | null
-          viewport_width?: number
-          viewport_height?: number
-          started_at?: string | null
-          completed_at?: string | null
-          error_message?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          campaign_id?: string
-          status?: 'pending' | 'running' | 'completed' | 'failed'
-          user_agent?: string | null
-          viewport_width?: number
-          viewport_height?: number
-          started_at?: string | null
-          completed_at?: string | null
-          error_message?: string | null
-          created_at?: string
-        }
-      }
-      session_activities: {
-        Row: {
-          id: string
-          session_id: string
-          journey_step_id: string | null
-          action_type: string
-          element_selector: string | null
-          success: boolean
-          duration_ms: number | null
-          screenshot_url: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          session_id: string
-          journey_step_id?: string | null
-          action_type: string
-          element_selector?: string | null
-          success?: boolean
-          duration_ms?: number | null
-          screenshot_url?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          session_id?: string
-          journey_step_id?: string | null
-          action_type?: string
-          element_selector?: string | null
-          success?: boolean
-          duration_ms?: number | null
-          screenshot_url?: string | null
-          created_at?: string
-        }
-      }
-      performance_metrics: {
-        Row: {
-          id: string
-          session_id: string
-          url: string
-          load_time_ms: number | null
-          dom_ready_ms: number | null
-          first_paint_ms: number | null
-          first_contentful_paint_ms: number | null
-          time_to_interactive_ms: number | null
-          total_requests: number | null
-          total_size_kb: number | null
-          memory_used_mb: number | null
-          cpu_usage_percent: number | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          session_id: string
-          url: string
-          load_time_ms?: number | null
-          dom_ready_ms?: number | null
-          first_paint_ms?: number | null
-          first_contentful_paint_ms?: number | null
-          time_to_interactive_ms?: number | null
-          total_requests?: number | null
-          total_size_kb?: number | null
-          memory_used_mb?: number | null
-          cpu_usage_percent?: number | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          session_id?: string
-          url?: string
-          load_time_ms?: number | null
-          dom_ready_ms?: number | null
-          first_paint_ms?: number | null
-          first_contentful_paint_ms?: number | null
-          time_to_interactive_ms?: number | null
-          total_requests?: number | null
-          total_size_kb?: number | null
-          memory_used_mb?: number | null
-          cpu_usage_percent?: number | null
-          created_at?: string
-        }
-      }
-      browser_plugins: {
-        Row: {
-          id: string
-          campaign_id: string
-          name: string
-          extension_id: string | null
-          enabled: boolean
-          configuration: Json
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          campaign_id: string
-          name: string
-          extension_id?: string | null
-          enabled?: boolean
-          configuration?: Json
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          campaign_id?: string
-          name?: string
-          extension_id?: string | null
-          enabled?: boolean
-          configuration?: Json
-          created_at?: string
-        }
-      }
-      analytics_events: {
-        Row: {
-          id: string
-          session_id: string
-          event_type: 'pageview' | 'click' | 'conversion' | 'error' | 'custom'
-          event_category: string | null
-          event_action: string | null
-          event_label: string | null
-          event_value: number | null
-          metadata: Json
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          session_id: string
-          event_type: 'pageview' | 'click' | 'conversion' | 'error' | 'custom'
-          event_category?: string | null
-          event_action?: string | null
-          event_label?: string | null
-          event_value?: number | null
-          metadata?: Json
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          session_id?: string
-          event_type?: 'pageview' | 'click' | 'conversion' | 'error' | 'custom'
-          event_category?: string | null
-          event_action?: string | null
-          event_label?: string | null
-          event_value?: number | null
-          metadata?: Json
-          created_at?: string
-        }
-      }
-      google_analytics_config: {
-        Row: {
-          id: string
-          user_id: string
-          property_id: string | null
-          measurement_id: string | null
-          api_secret: string | null
-          service_account_key: Json | null
-          enabled: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          property_id?: string | null
-          measurement_id?: string | null
-          api_secret?: string | null
-          service_account_key?: Json | null
-          enabled?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          property_id?: string | null
-          measurement_id?: string | null
-          api_secret?: string | null
-          service_account_key?: Json | null
-          enabled?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-      }
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      [_ in never]: never
-    }
-    Enums: {
-      [_ in never]: never
-    }
-  }
-}
+type Nullable<T> = T | null;
+
+type CampaignRow = {
+	id: string;
+	user_id: Nullable<string>;
+	name: string;
+	target_url: string;
+	total_sessions: number;
+	concurrent_bots: number;
+	session_duration_min: number;
+	session_duration_max: number;
+	target_geo_locations: Nullable<string[]>;
+	use_residential_proxies: boolean;
+	proxy_provider: Nullable<string>;
+	proxy_username: Nullable<string>;
+	proxy_password: Nullable<string>;
+	proxy_host: Nullable<string>;
+	proxy_port: Nullable<string>;
+	total_users: number;
+	distribution_period_hours: number;
+	distribution_pattern: Nullable<string>;
+	traffic_source_distribution: Nullable<Json>;
+	search_keywords: Nullable<string[]>;
+	extension_crx_url: Nullable<string>;
+	bounce_rate: Nullable<number>;
+	custom_referrer: Nullable<string>;
+	use_serp_api: Nullable<boolean>;
+	serp_api_provider: Nullable<string>;
+	sessions_per_hour: Nullable<number>;
+	status: Nullable<string>;
+	created_at: Nullable<string>;
+	updated_at: Nullable<string>;
+	started_at?: Nullable<string>;
+	use_browser_automation?: Nullable<boolean>;
+	use_luna_proxy_search?: Nullable<boolean>;
+	campaign_type?: Nullable<'direct' | 'search'>;
+};
+
+type UserJourneyRow = {
+	id?: string;
+	campaign_id: string;
+	step_order: number;
+	action_type: string;
+	selector: Nullable<string>;
+	value: Nullable<string>;
+	wait_before: Nullable<number>;
+	wait_after: Nullable<number>;
+};
+
+type BrowserPluginRow = {
+	id?: string;
+	campaign_id: string;
+	name: string;
+	extension_id: Nullable<string>;
+	enabled: Nullable<boolean>;
+	configuration: Json;
+};
+
+type BotSessionRow = {
+	id: string;
+	campaign_id: string;
+	status: string;
+	user_agent: Nullable<string>;
+	viewport_width: Nullable<number>;
+	viewport_height: Nullable<number>;
+	geo_location: Nullable<string>;
+	proxy_ip: Nullable<string>;
+	proxy_type: Nullable<string>;
+	traffic_source: Nullable<string>;
+	search_keyword: Nullable<string>;
+	referrer?: Nullable<string>;
+	is_bounced?: Nullable<boolean>;
+	bounce_duration_ms?: Nullable<number>;
+	started_at?: Nullable<string>;
+	created_at?: Nullable<string>;
+	expected_duration_ms?: Nullable<number>;
+	google_search_attempted?: Nullable<boolean>;
+	google_search_timestamp?: Nullable<string>;
+};
+
+type PerformanceMetricRow = {
+	id?: string;
+	session_id: string;
+	load_time_ms: Nullable<number>;
+	dom_ready_ms: Nullable<number>;
+};
+
+type BrightDataSerpConfigRow = {
+  user_id: string;
+  api_token: Nullable<string>;
+  api_password: Nullable<string>;
+  customer_id: Nullable<string>;
+  zone_name: Nullable<string>;
+  endpoint: Nullable<string>;
+  port: Nullable<string>;
+  enabled: Nullable<boolean>;
+  use_browser_automation: Nullable<boolean>;
+  browser_api_token: Nullable<string>;
+  browser_zone: Nullable<string>;
+  browser_customer_id: Nullable<string>;
+  browser_username: Nullable<string>;
+  browser_password: Nullable<string>;
+  browser_endpoint: Nullable<string>;
+  browser_port: Nullable<string>;
+  updated_at?: Nullable<string>;
+};
+
+type SerpConfigRow = {
+	id: string;
+	user_id: string;
+	browser_customer_id: Nullable<string>;
+	browser_username: Nullable<string>;
+	browser_password: Nullable<string>;
+	browser_zone: Nullable<string>;
+	browser_endpoint: Nullable<string>;
+	browser_port: Nullable<number>;
+	created_at?: Nullable<string>;
+	updated_at?: Nullable<string>;
+};export type Database = {
+	public: {
+		Tables: {
+			campaigns: {
+				Row: CampaignRow;
+				Insert: Partial<CampaignRow>;
+				Update: Partial<CampaignRow>;
+			};
+			user_journeys: {
+				Row: UserJourneyRow;
+				Insert: Partial<UserJourneyRow>;
+				Update: Partial<UserJourneyRow>;
+			};
+			browser_plugins: {
+				Row: BrowserPluginRow;
+				Insert: Partial<BrowserPluginRow>;
+				Update: Partial<BrowserPluginRow>;
+			};
+			bot_sessions: {
+				Row: BotSessionRow;
+				Insert: Partial<BotSessionRow>;
+				Update: Partial<BotSessionRow>;
+			};
+			performance_metrics: {
+				Row: PerformanceMetricRow;
+				Insert: Partial<PerformanceMetricRow>;
+				Update: Partial<PerformanceMetricRow>;
+			};
+			bright_data_serp_config: {
+				Row: BrightDataSerpConfigRow;
+				Insert: Partial<BrightDataSerpConfigRow>;
+				Update: Partial<BrightDataSerpConfigRow>;
+			};
+			serp_configs: {
+				Row: SerpConfigRow;
+				Insert: Partial<SerpConfigRow>;
+				Update: Partial<SerpConfigRow>;
+			};
+		};
+	};
+};

@@ -43,10 +43,18 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
   const [customReferrer, setCustomReferrer] = useState('');
   const [useSerpApi, setUseSerpApi] = useState(false);
   const [serpApiProvider, setSerpApiProvider] = useState('bright_data');
+  const [useBrowserAutomation, setUseBrowserAutomation] = useState(false);
+  const [useLunaProxySearch, setUseLunaProxySearch] = useState(false);
+  const [campaignType, setCampaignType] = useState<'direct' | 'search'>('direct');
   const [currentTab, setCurrentTab] = useState<'basic' | 'geo' | 'journey' | 'plugins'>('basic');
 
   useEffect(() => {
     if (campaign) {
+      console.log('[LOAD DEBUG] Loading campaign:', {
+        id: campaign.id,
+        name: campaign.name,
+        traffic_source_distribution: campaign.traffic_source_distribution
+      });
       setName(campaign.name);
       setTargetUrl(campaign.target_url);
       setTotalSessions(campaign.total_sessions);
@@ -63,13 +71,20 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
       setTotalUsers(campaign.total_users);
       setDistributionPeriodHours(campaign.distribution_period_hours);
       setDistributionPattern(campaign.distribution_pattern);
-      setTrafficSourceDistribution(campaign.traffic_source_distribution || { direct: 50, search: 50 });
+      
+      const trafficDist = campaign.traffic_source_distribution || { direct: 50, search: 50 };
+      console.log('[LOAD DEBUG] Setting traffic distribution to:', trafficDist);
+      setTrafficSourceDistribution(trafficDist);
+      
       setSearchKeywords(campaign.search_keywords || []);
       setExtensionId(campaign.extension_crx_url || '');
       setBounceRate(campaign.bounce_rate || 30);
       setCustomReferrer(campaign.custom_referrer || '');
       setUseSerpApi(campaign.use_serp_api || false);
       setSerpApiProvider(campaign.serp_api_provider || 'bright_data');
+      setUseBrowserAutomation(campaign.use_browser_automation || false);
+      setUseLunaProxySearch(campaign.use_luna_proxy_search || false);
+      setCampaignType(campaign.campaign_type || 'direct');
       loadJourneys(campaign.id);
       loadPlugins(campaign.id);
     }
@@ -104,37 +119,51 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
 
       const sessionsPerHour = totalUsers / distributionPeriodHours;
 
+      console.log('[SAVE DEBUG] Saving campaign with traffic distribution:', trafficSourceDistribution);
+
       if (campaign) {
-        await supabase
+        const updateData = {
+          name,
+          target_url: targetUrl,
+          total_sessions: totalSessions,
+          concurrent_bots: concurrentBots,
+          session_duration_min: sessionDurationMin,
+          session_duration_max: sessionDurationMax,
+          target_geo_locations: targetGeoLocations,
+          use_residential_proxies: useResidentialProxies,
+          proxy_provider: proxyProvider,
+          proxy_username: proxyUsername,
+          proxy_password: proxyPassword,
+          proxy_host: proxyHost,
+          proxy_port: proxyPort,
+          total_users: totalUsers,
+          distribution_period_hours: distributionPeriodHours,
+          distribution_pattern: distributionPattern,
+          sessions_per_hour: sessionsPerHour,
+          bounce_rate: bounceRate,
+          traffic_source_distribution: trafficSourceDistribution,
+          search_keywords: searchKeywords,
+          extension_crx_url: extensionId || null,
+          custom_referrer: customReferrer || null,
+          use_serp_api: useSerpApi,
+          serp_api_provider: serpApiProvider,
+          use_browser_automation: useBrowserAutomation,
+          use_luna_proxy_search: useLunaProxySearch,
+          campaign_type: campaignType,
+          updated_at: new Date().toISOString(),
+        };
+        console.log('[SAVE DEBUG] Full update payload:', updateData);
+        
+        const { error } = await supabase
           .from('campaigns')
-          .update({
-            name,
-            target_url: targetUrl,
-            total_sessions: totalSessions,
-            concurrent_bots: concurrentBots,
-            session_duration_min: sessionDurationMin,
-            session_duration_max: sessionDurationMax,
-            target_geo_locations: targetGeoLocations,
-            use_residential_proxies: useResidentialProxies,
-            proxy_provider: proxyProvider,
-            proxy_username: proxyUsername,
-            proxy_password: proxyPassword,
-            proxy_host: proxyHost,
-            proxy_port: proxyPort,
-            total_users: totalUsers,
-            distribution_period_hours: distributionPeriodHours,
-            distribution_pattern: distributionPattern,
-            sessions_per_hour: sessionsPerHour,
-            bounce_rate: bounceRate,
-            traffic_source_distribution: trafficSourceDistribution,
-            search_keywords: searchKeywords,
-            extension_crx_url: extensionId || null,
-            custom_referrer: customReferrer || null,
-            use_serp_api: useSerpApi,
-            serp_api_provider: serpApiProvider,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq('id', campaign.id);
+        
+        if (error) {
+          console.error('[SAVE DEBUG] Update error:', error);
+          throw error;
+        }
+        console.log('[SAVE DEBUG] Update successful');
       } else {
         const { data, error } = await supabase
           .from('campaigns')
@@ -164,6 +193,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
             custom_referrer: customReferrer || null,
             use_serp_api: useSerpApi,
             serp_api_provider: serpApiProvider,
+            use_browser_automation: useBrowserAutomation,
+            use_luna_proxy_search: useLunaProxySearch,
+            campaign_type: campaignType,
           })
           .select()
           .single();
@@ -284,6 +316,51 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
                   className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
                   placeholder="My Load Test Campaign"
                 />
+              </div>
+
+              <div className="bg-gradient-to-r from-cyan-500/10 to-green-500/10 border-2 border-cyan-500/30 rounded-xl p-6">
+                <label className="block text-sm font-medium text-white mb-3">
+                  Campaign Type
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setCampaignType('search')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      campaignType === 'search'
+                        ? 'bg-cyan-500/20 border-cyan-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-lg font-semibold mb-1">🔍 Search Campaign</div>
+                    <div className="text-xs opacity-80">Browser API for Google Search + Click</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCampaignType('direct')}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      campaignType === 'direct'
+                        ? 'bg-green-500/20 border-green-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="text-lg font-semibold mb-1">🎯 Direct Campaign</div>
+                    <div className="text-xs opacity-80">Luna Proxy for Direct Navigation</div>
+                  </button>
+                </div>
+                <div className="mt-4 p-3 bg-slate-900/50 rounded-lg">
+                  <div className="text-sm text-slate-300">
+                    {campaignType === 'search' ? (
+                      <>
+                        <span className="text-cyan-400 font-semibold">Search Campaign:</span> Uses Bright Data Browser API exclusively for Google search and target site navigation. No Luna proxy involved.
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-green-400 font-semibold">Direct Campaign:</span> Uses Luna residential proxy exclusively for direct navigation to target URL. No search involved.
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -455,49 +532,156 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
                 </p>
               </div>
 
-              <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useResidentialProxies}
-                    onChange={(e) => {
-                      setUseResidentialProxies(e.target.checked);
-                      if (e.target.checked) {
-                        setUseSerpApi(false);
-                      }
-                    }}
-                    disabled={useSerpApi}
-                    className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
+              <div className="bg-slate-900 rounded-lg p-4 border border-slate-700 space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
-                    <div className="text-white font-medium">Use Luna Proxy {useSerpApi && '(Required for Target Site)'}</div>
-                    <div className="text-slate-400 text-sm">
-                      {useSerpApi ? (
-                        <>REQUIRED: Luna proxy for target site visits after Google search. System switches from SERP to Luna proxy.</>
-                      ) : (
-                        <>Route all traffic through residential IPs for authentic geo-location</>
-                      )}
-                    </div>
+                    <div className="text-white font-medium">Residential Proxies</div>
+                    <div className="text-slate-400 text-sm">Configure provider, credentials, and search routing. Fields stay visible for quick edits.</div>
                   </div>
-                </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useResidentialProxies}
+                      onChange={(e) => {
+                        setUseResidentialProxies(e.target.checked);
+                        if (e.target.checked) {
+                          setUseSerpApi(false);
+                        }
+                      }}
+                      disabled={useSerpApi}
+                      className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-sm text-slate-200">Enable for traffic</span>
+                  </label>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Proxy Provider
+                    </label>
+                    <select
+                      value={proxyProvider}
+                      onChange={(e) => setProxyProvider(e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    >
+                      <option value="luna">Luna Proxy (Recommended)</option>
+                      <option value="brightdata">Bright Data</option>
+                      <option value="smartproxy">SmartProxy</option>
+                      <option value="oxylabs">Oxylabs</option>
+                      <option value="geosurf">GeoSurf</option>
+                      <option value="default">Other/Custom</option>
+                    </select>
+                  </div>
+
+                  {proxyProvider === 'luna' && (
+                    <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-700/40 rounded-lg p-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-green-300">Browser API for Search Traffic</div>
+                          <p className="text-xs text-slate-400">Use Bright Data Browser API for Google search (auto CAPTCHA solving). Luna used for direct navigation only.</p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={useLunaProxySearch}
+                            onChange={(e) => setUseLunaProxySearch(e.target.checked)}
+                            className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-green-500"
+                          />
+                          <span className="text-sm text-slate-200">Enable</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Proxy Username
+                    </label>
+                    <input
+                      type="text"
+                      value={proxyUsername}
+                      onChange={(e) => setProxyUsername(e.target.value)}
+                      placeholder="user-admin_X5otK"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Proxy Password
+                    </label>
+                    <input
+                      type="password"
+                      value={proxyPassword}
+                      onChange={(e) => setProxyPassword(e.target.value)}
+                      placeholder="Enter password"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Proxy Host
+                    </label>
+                    <input
+                      type="text"
+                      value={proxyHost}
+                      onChange={(e) => setProxyHost(e.target.value)}
+                      placeholder="pr.lunaproxy.com"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      Proxy Port
+                    </label>
+                    <input
+                      type="text"
+                      value={proxyPort}
+                      onChange={(e) => setProxyPort(e.target.value)}
+                      placeholder="12233"
+                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <p className="text-slate-400 text-xs">
+                  Credentials stay editable even if residential routing is toggled off. We will only apply the proxy when the toggle is on.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">
-                  Proxy Provider
-                </label>
-                <select
-                  value={proxyProvider}
-                  onChange={(e) => setProxyProvider(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                >
-                  <option value="luna">Luna Proxy (Recommended)</option>
-                  <option value="brightdata">Bright Data</option>
-                  <option value="smartproxy">SmartProxy</option>
-                  <option value="oxylabs">Oxylabs</option>
-                  <option value="geosurf">GeoSurf</option>
-                  <option value="default">Other/Custom</option>
-                </select>
+              <div className="space-y-3 bg-slate-900 rounded-lg p-4 border border-slate-700">
+                <div className="flex items-center justify-between mb-1">
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">Browser Automation API (Bright Data)</h4>
+                    <p className="text-xs text-slate-400">Single remote browser handles search, results, and navigation to target URL (no proxy switching).</p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useBrowserAutomation}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setUseBrowserAutomation(checked);
+                        if (checked) setUseSerpApi(false);
+                      }}
+                      className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-cyan-500"
+                    />
+                    <span className="text-sm text-slate-200">Enable</span>
+                  </label>
+                </div>
+                <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/30 rounded px-3 py-2">
+                  Uses your Bright Data Browser Automation zone (e.g., unblocker). Google search → results → click → target all in one browser.
+                </p>
+                <p className="text-xs text-slate-500">
+                  If enabled, dual-proxy SERP flow is bypassed. Ensure search traffic % and keywords are set for Google steps.
+                </p>
               </div>
 
               <div className="space-y-4 bg-gradient-to-br from-cyan-900/20 to-blue-900/20 p-4 rounded-lg border border-cyan-700/30">
@@ -618,6 +802,33 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
                 </div>
               )}
 
+              {useResidentialProxies && proxyProvider === 'luna' && (
+                <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 p-4 rounded-lg border border-green-700/30">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-green-300">Browser API for Search Traffic</h4>
+                      <p className="text-xs text-slate-400 mt-1">Use Bright Data Browser API for Google search with automatic CAPTCHA solving</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useLunaProxySearch}
+                        onChange={(e) => setUseLunaProxySearch(e.target.checked)}
+                        className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-green-500"
+                      />
+                      <span className="text-sm text-slate-200">Enable</span>
+                    </label>
+                  </div>
+                  {useLunaProxySearch && (
+                    <div className="mt-3 pt-3 border-t border-green-700/30 text-xs text-green-300">
+                      <p className="mb-2">✓ Search traffic uses Browser API (no Google blocks, auto CAPTCHA solving)</p>
+                      <p className="mb-2">✓ Luna proxy used for direct navigation only (cost-effective)</p>
+                      <p>✓ Requires: Search traffic % &gt; 0, Search keywords, Browser API credentials</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
                 <h4 className="text-sm font-semibold text-white mb-3">Browser Extension (Optional)</h4>
                 <p className="text-slate-400 text-sm mb-4">
@@ -711,116 +922,178 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
               </div>
 
               <div className="border-t border-slate-700 pt-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Traffic Source Distribution</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">
+                  {campaignType === 'search' ? 'Search Keywords (Required)' : 'Traffic Source Distribution'}
+                </h3>
 
-                <div className="grid grid-cols-2 gap-6 mb-4">
+                {campaignType === 'search' ? (
+                  // Search Campaign: Show Keywords Only
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Direct Traffic (%)
+                      Search Keywords
                     </label>
-                    <input
-                      type="number"
-                      value={trafficSourceDistribution.direct}
-                      onChange={(e) => {
-                        const direct = parseInt(e.target.value) || 0;
-                        setTrafficSourceDistribution({ direct, search: 100 - direct });
-                      }}
-                      min="0"
-                      max="100"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                    <p className="text-slate-500 text-xs mt-1">
-                      Users navigate directly to URL
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Search Traffic (%)
-                    </label>
-                    <input
-                      type="number"
-                      value={trafficSourceDistribution.search}
-                      onChange={(e) => {
-                        const search = parseInt(e.target.value) || 0;
-                        setTrafficSourceDistribution({ direct: 100 - search, search });
-                      }}
-                      min="0"
-                      max="100"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                    <p className="text-slate-500 text-xs mt-1">
-                      Users search Google then click result
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Search Keywords
-                  </label>
-                  <div className="flex gap-2 mb-3">
-                    <input
-                      type="text"
-                      value={keywordInput}
-                      onChange={(e) => setKeywordInput(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && keywordInput.trim()) {
-                          e.preventDefault();
-                          setSearchKeywords([...searchKeywords, keywordInput.trim()]);
-                          setKeywordInput('');
-                        }
-                      }}
-                      placeholder="Enter keyword and press Enter"
-                      className="flex-1 px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (keywordInput.trim()) {
-                          setSearchKeywords([...searchKeywords, keywordInput.trim()]);
-                          setKeywordInput('');
-                        }
-                      }}
-                      className="px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
-                    >
-                      Add
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {searchKeywords.map((keyword, idx) => (
-                      <span
-                        key={idx}
-                        className="px-3 py-2 bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-sm flex items-center gap-2"
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={keywordInput}
+                        onChange={(e) => setKeywordInput(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter' && keywordInput.trim()) {
+                            e.preventDefault();
+                            setSearchKeywords([...searchKeywords, keywordInput.trim()]);
+                            setKeywordInput('');
+                          }
+                        }}
+                        placeholder="Enter keyword and press Enter"
+                        className="flex-1 px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (keywordInput.trim()) {
+                            setSearchKeywords([...searchKeywords, keywordInput.trim()]);
+                            setKeywordInput('');
+                          }
+                        }}
+                        className="px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
                       >
-                        {keyword}
+                        Add
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {searchKeywords.map((keyword, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-2 bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-sm flex items-center gap-2"
+                        >
+                          {keyword}
+                          <button
+                            type="button"
+                            onClick={() => setSearchKeywords(searchKeywords.filter((_, i) => i !== idx))}
+                            className="text-green-400 hover:text-green-300"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-slate-500 text-sm mt-2">
+                      Bots will randomly search these keywords on Google and click your site from results
+                    </p>
+                  </div>
+                ) : (
+                  // Direct Campaign: Show Traffic Distribution (backward compatibility)
+                  <>
+                    <div className="grid grid-cols-2 gap-6 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Direct Traffic (%)
+                        </label>
+                        <input
+                          type="number"
+                          value={trafficSourceDistribution.direct}
+                          onChange={(e) => {
+                            const direct = parseInt(e.target.value) || 0;
+                            setTrafficSourceDistribution({ direct, search: 100 - direct });
+                          }}
+                          min="0"
+                          max="100"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                        <p className="text-slate-500 text-xs mt-1">
+                          Users navigate directly to URL
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Search Traffic (%)
+                        </label>
+                        <input
+                          type="number"
+                          value={trafficSourceDistribution.search}
+                          onChange={(e) => {
+                            const search = parseInt(e.target.value) || 0;
+                            setTrafficSourceDistribution({ direct: 100 - search, search });
+                          }}
+                          min="0"
+                          max="100"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                        <p className="text-slate-500 text-xs mt-1">
+                          Users search Google then click result
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Search Keywords
+                      </label>
+                      <div className="flex gap-2 mb-3">
+                        <input
+                          type="text"
+                          value={keywordInput}
+                          onChange={(e) => setKeywordInput(e.target.value)}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter' && keywordInput.trim()) {
+                              e.preventDefault();
+                              setSearchKeywords([...searchKeywords, keywordInput.trim()]);
+                              setKeywordInput('');
+                            }
+                          }}
+                          placeholder="Enter keyword and press Enter"
+                          className="flex-1 px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
                         <button
                           type="button"
-                          onClick={() => setSearchKeywords(searchKeywords.filter((_, i) => i !== idx))}
-                          className="text-green-400 hover:text-green-300"
+                          onClick={() => {
+                            if (keywordInput.trim()) {
+                              setSearchKeywords([...searchKeywords, keywordInput.trim()]);
+                              setKeywordInput('');
+                            }
+                          }}
+                          className="px-4 py-3 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
                         >
-                          ×
+                          Add
                         </button>
-                      </span>
-                    ))}
-                  </div>
-                  <p className="text-slate-500 text-sm mt-2">
-                    Bots will randomly search these keywords on Google and click your site from results
-                  </p>
-                </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {searchKeywords.map((keyword, idx) => (
+                          <span
+                            key={idx}
+                            className="px-3 py-2 bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-sm flex items-center gap-2"
+                          >
+                            {keyword}
+                            <button
+                              type="button"
+                              onClick={() => setSearchKeywords(searchKeywords.filter((_, i) => i !== idx))}
+                              className="text-green-400 hover:text-green-300"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-slate-500 text-sm mt-2">
+                        Bots will randomly search these keywords on Google and click your site from results
+                      </p>
+                    </div>
 
-                <div className="mt-4 p-4 bg-slate-900 rounded-lg border border-slate-700">
-                  <div className="text-sm text-slate-300 space-y-1">
-                    <div>
-                      <span className="font-medium text-white">Direct:</span>{' '}
-                      {Math.round((totalUsers * trafficSourceDistribution.direct) / 100)} users
+                    <div className="mt-4 p-4 bg-slate-900 rounded-lg border border-slate-700">
+                      <div className="text-sm text-slate-300 space-y-1">
+                        <div>
+                          <span className="font-medium text-white">Direct:</span>{' '}
+                          {Math.round((totalUsers * trafficSourceDistribution.direct) / 100)} users
+                        </div>
+                        <div>
+                          <span className="font-medium text-white">Search:</span>{' '}
+                          {Math.round((totalUsers * trafficSourceDistribution.search) / 100)} users
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-medium text-white">Search:</span>{' '}
-                      {Math.round((totalUsers * trafficSourceDistribution.search) / 100)} users
-                    </div>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
             </div>
           )}

@@ -1,0 +1,2422 @@
+const express = require('express');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const UserAgent = require('user-agents');
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
+const axios = require('axios');
+
+// Add stealth plugin with all evasions
+puppeteer.use(StealthPlugin());
+
+// ════════════════════════════════════════════════════════════════════════
+// REAL DEVICE MODE - Advanced Fingerprinting & Anti-Detection
+// ════════════════════════════════════════════════════════════════════════
+
+// Realistic device profiles database
+const DEVICE_PROFILES = {
+  // Desktop Windows
+  'windows_chrome_high': {
+    name: 'Windows 11 - Chrome 120 - High-end',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    platform: 'Win32',
+    screenWidth: 1920,
+    screenHeight: 1080,
+    devicePixelRatio: 1,
+    hardwareConcurrency: 16,
+    deviceMemory: 32,
+    touchEvents: false,
+    gpu: { vendor: 'NVIDIA', model: 'RTX 4070' },
+    chromeVersion: '120.0.0.0',
+    plugins: ['Chrome PDF Plugin', 'Chrome PDF Viewer', 'Native Client Plugin'],
+    audioContext: true,
+    webGL: { vendor: 'NVIDIA', version: '4.6' },
+  },
+  'windows_chrome_mid': {
+    name: 'Windows 10 - Chrome 120 - Mid-range',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    platform: 'Win32',
+    screenWidth: 1366,
+    screenHeight: 768,
+    devicePixelRatio: 1,
+    hardwareConcurrency: 8,
+    deviceMemory: 16,
+    touchEvents: false,
+    gpu: { vendor: 'Intel', model: 'UHD Graphics 730' },
+    chromeVersion: '120.0.0.0',
+    plugins: ['Chrome PDF Plugin', 'Chrome PDF Viewer'],
+    audioContext: true,
+    webGL: { vendor: 'Intel', version: '4.4' },
+  },
+  
+  // Mac
+  'mac_chrome_high': {
+    name: 'macOS Sonoma - Chrome 120',
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    platform: 'MacIntel',
+    screenWidth: 1440,
+    screenHeight: 900,
+    devicePixelRatio: 2,
+    hardwareConcurrency: 10,
+    deviceMemory: 16,
+    touchEvents: false,
+    gpu: { vendor: 'Apple', model: 'M2 Max' },
+    chromeVersion: '120.0.0.0',
+    plugins: ['Chrome PDF Plugin', 'Chrome PDF Viewer'],
+    audioContext: true,
+    webGL: { vendor: 'Apple', version: '4.5' },
+  },
+  
+  // Linux
+  'linux_chrome_mid': {
+    name: 'Ubuntu 22.04 - Chrome 120',
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    platform: 'Linux x86_64',
+    screenWidth: 1920,
+    screenHeight: 1080,
+    devicePixelRatio: 1,
+    hardwareConcurrency: 8,
+    deviceMemory: 16,
+    touchEvents: false,
+    gpu: { vendor: 'NVIDIA', model: 'RTX 3060' },
+    chromeVersion: '120.0.0.0',
+    plugins: [],
+    audioContext: true,
+    webGL: { vendor: 'NVIDIA', version: '4.5' },
+  },
+  
+  // Mobile/Tablet
+  'mobile_chrome': {
+    name: 'Android - Chrome Mobile',
+    userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    platform: 'Linux aarch64',
+    screenWidth: 1080,
+    screenHeight: 2340,
+    devicePixelRatio: 2.75,
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    touchEvents: true,
+    gpu: { vendor: 'Qualcomm', model: 'Adreno 8cx' },
+    chromeVersion: '120.0.0.0',
+    plugins: [],
+    audioContext: true,
+    webGL: { vendor: 'Qualcomm', version: '3.0' },
+  },
+};
+
+// Generate random device profile based on geo location
+function generateDeviceProfile(geoLocation = 'US') {
+  const profileKeys = Object.keys(DEVICE_PROFILES);
+  
+  // Bias selection based on geo
+  let selectedKey;
+  if (geoLocation === 'CN') {
+    selectedKey = 'linux_chrome_mid'; // Simulate Chinese market
+  } else if (['JP', 'KR', 'SG'].includes(geoLocation)) {
+    selectedKey = 'mobile_chrome'; // Mobile heavy in Asia
+  } else if (geoLocation === 'US') {
+    const choices = ['windows_chrome_high', 'windows_chrome_mid', 'mac_chrome_high'];
+    selectedKey = choices[Math.floor(Math.random() * choices.length)];
+  } else {
+    selectedKey = profileKeys[Math.floor(Math.random() * profileKeys.length)];
+  }
+  
+  const profile = { ...DEVICE_PROFILES[selectedKey] };
+  
+  // Add some randomization to avoid fingerprinting patterns
+  if (Math.random() > 0.5) {
+    profile.hardwareConcurrency = [4, 6, 8, 12, 16][Math.floor(Math.random() * 5)];
+  }
+  if (Math.random() > 0.5) {
+    profile.deviceMemory = [4, 8, 16, 32][Math.floor(Math.random() * 4)];
+  }
+  
+  // Randomize screen resolution slightly
+  if (Math.random() > 0.7) {
+    const resolutions = [
+      { w: 1920, h: 1080 },
+      { w: 1366, h: 768 },
+      { w: 1440, h: 900 },
+      { w: 2560, h: 1440 },
+      { w: 3840, h: 2160 }
+    ];
+    const res = resolutions[Math.floor(Math.random() * resolutions.length)];
+    profile.screenWidth = res.w;
+    profile.screenHeight = res.h;
+  }
+  
+  return profile;
+}
+
+// Advanced fingerprint spoofing - injects real device properties
+async function injectRealDeviceFingerprint(page, deviceProfile) {
+  try {
+    // Create WebGL context fingerprint
+    const webglFingerprintScript = `
+      (function() {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        // Override WebGL properties
+        const originalGetParameter = ctx.getParameter.bind(ctx);
+        const glVendor = '${deviceProfile.webGL.vendor}';
+        const glVersion = '${deviceProfile.webGL.version}';
+        
+        Object.defineProperty(ctx, 'getParameter', {
+          value: function(parameter) {
+            if (parameter === 37445) return glVendor; // UNMASKED_VENDOR_WEBGL
+            if (parameter === 37446) return 'WebGL Implementation'; // UNMASKED_RENDERER_WEBGL
+            return originalGetParameter(parameter);
+          }
+        });
+      })();
+    `;
+    
+    // Create Canvas fingerprint (consistent hash)
+    const canvasFingerprintScript = `
+      (function() {
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        let canvasDataCache = {};
+        
+        HTMLCanvasElement.prototype.toDataURL = function(type) {
+          // Create consistent but unique hash for this canvas
+          const key = this.width + 'x' + this.height + ':' + type;
+          if (!canvasDataCache[key]) {
+            canvasDataCache[key] = originalToDataURL.call(this, type);
+          }
+          return canvasDataCache[key];
+        };
+        
+        // Also override getImageData for extra obfuscation
+        const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+        CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
+          return originalGetImageData.call(this, x, y, w, h);
+        };
+      })();
+    `;
+    
+    // Audio context fingerprint spoofing
+    const audioFingerprintScript = `
+      (function() {
+        const originalAudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!originalAudioContext) return;
+        
+        window.AudioContext = window.webkitAudioContext = class AudioContext extends originalAudioContext {
+          constructor() {
+            super();
+            // Fake audio device properties
+            Object.defineProperty(this, 'sampleRate', {
+              value: 44100 + Math.random() * 1000
+            });
+            Object.defineProperty(this, 'destination', {
+              value: {
+                maxChannelCount: 32,
+                numberOfInputs: 1,
+                numberOfOutputs: 1
+              }
+            });
+          }
+        };
+      })();
+    `;
+    
+    // GPU/Hardware properties spoofing
+    const hardwareScript = `
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        value: ${deviceProfile.hardwareConcurrency},
+        writable: false,
+        enumerable: true,
+        configurable: true
+      });
+      
+      Object.defineProperty(navigator, 'deviceMemory', {
+        value: ${deviceProfile.deviceMemory},
+        writable: false,
+        enumerable: true,
+        configurable: true
+      });
+      
+      // GPUDevice properties
+      if (navigator.gpu) {
+        Object.defineProperty(navigator.gpu, 'device', {
+          value: {
+            features: new Set(['indirect-dispatch', 'shader-f16', 'clip-distances', 'dual-source-blending']),
+            limits: {
+              maxBufferSize: Math.pow(2, 31) - 1,
+              maxStorageBufferBindingSize: Math.pow(2, 30) - 1,
+              maxComputeInvocationsPerWorkgroup: 1024
+            }
+          }
+        });
+      }
+    `;
+    
+    // Plugin properties spoofing
+    const pluginsScript = `
+      (function() {
+        const plugins = ${JSON.stringify(deviceProfile.plugins)};
+        
+        // Override navigator.plugins
+        Object.defineProperty(navigator, 'plugins', {
+          value: plugins.map((name, index) => ({
+            name: name,
+            description: name + ' Description',
+            length: 1,
+            filename: name.toLowerCase().replace(/ /g, '_') + '.so',
+            version: '1.0',
+            0: { name: 'pdf', type: 'application/pdf', suffixes: 'pdf' }
+          })),
+          writable: false,
+          enumerable: true
+        });
+        
+        // Override navigator.mimeTypes
+        Object.defineProperty(navigator, 'mimeTypes', {
+          value: {
+            'application/pdf': {
+              type: 'application/pdf',
+              suffixes: 'pdf',
+              enabledPlugin: plugins[0],
+              description: 'Portable Document Format'
+            }
+          },
+          writable: false,
+          enumerable: true
+        });
+      })();
+    `;
+    
+    // Screen properties spoofing
+    const screenScript = `
+      Object.defineProperty(screen, 'width', {
+        value: ${deviceProfile.screenWidth},
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(screen, 'height', {
+        value: ${deviceProfile.screenHeight},
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(screen, 'availWidth', {
+        value: ${deviceProfile.screenWidth - 100},
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(screen, 'availHeight', {
+        value: ${deviceProfile.screenHeight - 100},
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(screen, 'colorDepth', {
+        value: 24,
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(screen, 'pixelDepth', {
+        value: 24,
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(window, 'devicePixelRatio', {
+        value: ${deviceProfile.devicePixelRatio},
+        writable: false,
+        configurable: true
+      });
+    `;
+    
+    // Touch events spoofing
+    const touchScript = `
+      ${deviceProfile.touchEvents ? `
+        // Add touch support
+        window.ontouchstart = null;
+        window.ontouchend = null;
+        window.ontouchcancel = null;
+        window.ontouchmove = null;
+        
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+          value: 5,
+          writable: false,
+          configurable: true
+        });
+        
+        Object.defineProperty(navigator, 'msMaxTouchPoints', {
+          value: 5,
+          writable: false,
+          configurable: true
+        });
+      ` : `
+        // Disable touch
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+          value: 0,
+          writable: false,
+          configurable: true
+        });
+      `}
+    `;
+    
+    // Chrome version spoofing
+    const chromeVersionScript = `
+      Object.defineProperty(navigator, 'appVersion', {
+        value: '5.0 (${deviceProfile.platform})',
+        writable: false,
+        configurable: true
+      });
+      
+      Object.defineProperty(navigator, 'product', {
+        value: 'Gecko',
+        writable: false,
+        configurable: true
+      });
+    `;
+    
+    // Fonts detection spoofing - common fonts exist
+    const fontsScript = `
+      window.fontList = [
+        'Arial', 'Times New Roman', 'Courier New', 'Georgia',
+        'Verdana', 'Comic Sans MS', 'Trebuchet MS', 'Impact',
+        'Segoe UI', 'Consolas', 'Calibri', 'Cambria',
+        'Helvetica', 'Garamond', 'Palatino', 'Lucida Console'
+      ];
+    `;
+    
+    // Inject all scripts on every new document/page
+    await page.evaluateOnNewDocument(webglFingerprintScript);
+    await page.evaluateOnNewDocument(canvasFingerprintScript);
+    await page.evaluateOnNewDocument(audioFingerprintScript);
+    await page.evaluateOnNewDocument(hardwareScript);
+    await page.evaluateOnNewDocument(pluginsScript);
+    await page.evaluateOnNewDocument(screenScript);
+    await page.evaluateOnNewDocument(touchScript);
+    await page.evaluateOnNewDocument(chromeVersionScript);
+    await page.evaluateOnNewDocument(fontsScript);
+    
+    console.log(`[FINGERPRINT] ✓ Injected real device properties for: ${deviceProfile.name}`);
+    
+  } catch (err) {
+    console.log(`[FINGERPRINT] Warning: Could not inject some properties: ${err.message}`);
+  }
+}
+
+// Set realistic headers for SERP and target sites
+async function setRealisticHeaders(page, deviceProfile) {
+  try {
+    await page.setUserAgent(deviceProfile.userAgent);
+    
+    await page.setViewport({
+      width: deviceProfile.screenWidth,
+      height: deviceProfile.screenHeight,
+      deviceScaleFactor: deviceProfile.devicePixelRatio
+    });
+    
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+      'Upgrade-Insecure-Requests': '1',
+      'DNT': '1',
+      'Connection': 'keep-alive',
+      'Cache-Control': 'max-age=0',
+      'Pragma': 'no-cache'
+    });
+    
+    console.log(`[HEADERS] ✓ Set realistic headers matching device profile`);
+  } catch (err) {
+    console.log(`[HEADERS] Warning: ${err.message}`);
+  }
+}
+
+// Simulate realistic search behavior for Google
+async function simulateGoogleSearchBehavior(page, searchKeyword) {
+  try {
+    // Wait for search results to load
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    
+    // Random behavior: scroll through results
+    const scrolls = Math.floor(Math.random() * 3) + 1; // 1-3 scrolls
+    for (let i = 0; i < scrolls; i++) {
+      await page.evaluate(() => window.scrollBy(0, window.innerHeight / 2));
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+    }
+    
+    // Random mouse movements (mimics human cursor)
+    const moves = Math.floor(Math.random() * 2) + 1; // 1-2 moves
+    for (let i = 0; i < moves; i++) {
+      await page.mouse.move(
+        Math.random() * 800,
+        Math.random() * 600
+      );
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+    }
+    
+    console.log(`[GOOGLE SEARCH] ✓ Simulated human search behavior`);
+  } catch (err) {
+    console.log(`[GOOGLE SEARCH] Note: ${err.message}`);
+  }
+}
+
+const app = express();
+app.use(express.json());
+
+console.log('Puppeteer server with 100k+ user agents and Google search support');
+
+// Cookie persistence directory
+const COOKIES_DIR = path.join(__dirname, 'cookies');
+if (!fs.existsSync(COOKIES_DIR)) {
+  fs.mkdirSync(COOKIES_DIR, { recursive: true });
+  console.log('[COOKIES] Created cookies directory for persistence');
+}
+
+// Load or create persistent cookies for a proxy/user combination
+function loadOrCreateCookies(proxyIdentifier) {
+  const cookieFile = path.join(COOKIES_DIR, `cookies_${proxyIdentifier}.json`);
+
+  if (fs.existsSync(cookieFile)) {
+    try {
+      const cookies = JSON.parse(fs.readFileSync(cookieFile, 'utf8'));
+      console.log(`[COOKIES] Loaded ${cookies.length} existing cookies for ${proxyIdentifier}`);
+      return cookies;
+    } catch (e) {
+      console.log(`[COOKIES] Error loading cookies for ${proxyIdentifier}, creating new ones`);
+    }
+  }
+
+  // Create new cookies
+  const currentTime = Math.floor(Date.now() / 1000);
+  const futureTime = currentTime + (365 * 24 * 60 * 60);
+
+  const cookies = [
+    {
+      name: 'PREF',
+      value: `ID=${Math.random().toString(36).substring(2, 15)}:TM=${currentTime}:LM=${currentTime}:S=${Math.random().toString(36).substring(2, 10)}`,
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'SID',
+      value: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'HSID',
+      value: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'SSID',
+      value: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'APISID',
+      value: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'SAPISID',
+      value: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'NID',
+      value: `${Math.floor(Math.random() * 1000)}=${Math.random().toString(36).substring(2, 40)}`,
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'CONSENT',
+      value: `YES+cb.${currentTime}-1-p0.en+FX+${Math.floor(Math.random() * 1000)}`,
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: '1P_JAR',
+      value: `${new Date().toISOString().split('T')[0]}-${Math.floor(Math.random() * 100)}`,
+      domain: '.google.com',
+      path: '/',
+      expires: currentTime + (30 * 24 * 60 * 60),
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    },
+    {
+      name: 'ANID',
+      value: `AHWqTUn${Math.random().toString(36).substring(2, 15)}`,
+      domain: '.google.com',
+      path: '/',
+      expires: futureTime,
+      httpOnly: false,
+      secure: true,
+      sameSite: 'None'
+    }
+  ];
+
+  // Save for future use
+  fs.writeFileSync(cookieFile, JSON.stringify(cookies, null, 2));
+  console.log(`[COOKIES] Created and saved ${cookies.length} new cookies for ${proxyIdentifier}`);
+
+  return cookies;
+}
+
+// Save cookies after session (to persist any Google updates)
+function saveCookies(proxyIdentifier, cookies) {
+  const cookieFile = path.join(COOKIES_DIR, `cookies_${proxyIdentifier}.json`);
+  try {
+    fs.writeFileSync(cookieFile, JSON.stringify(cookies, null, 2));
+    console.log(`[COOKIES] Saved ${cookies.length} cookies for ${proxyIdentifier}`);
+  } catch (e) {
+    console.log(`[COOKIES] Error saving cookies: ${e.message}`);
+  }
+}
+
+// Fingerprint randomization
+function getRandomFingerprint() {
+  const timezones = ['America/New_York', 'America/Los_Angeles', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Dubai', 'Australia/Sydney'];
+  const languages = ['en-US,en', 'en-GB,en', 'en-CA,en', 'es-ES,es', 'fr-FR,fr', 'de-DE,de', 'ja-JP,ja', 'zh-CN,zh'];
+
+  return {
+    timezone: timezones[Math.floor(Math.random() * timezones.length)],
+    language: languages[Math.floor(Math.random() * languages.length)],
+    hardwareConcurrency: [2, 4, 8, 12, 16][Math.floor(Math.random() * 5)],
+    deviceMemory: [2, 4, 8, 16, 32][Math.floor(Math.random() * 5)],
+    screenWidth: [1920, 1366, 1440, 2560, 1536][Math.floor(Math.random() * 5)],
+    screenHeight: [1080, 768, 900, 1440, 864][Math.floor(Math.random() * 5)],
+  };
+}
+
+// Simulate human behavior for Google Analytics engagement tracking
+async function simulateHumanBehavior(page) {
+  try {
+    // Random scroll patterns (GA tracks scroll depth)
+    const scrolls = Math.floor(Math.random() * 4) + 2; // 2-5 scrolls
+    for (let i = 0; i < scrolls; i++) {
+      const scrollAmount = Math.floor(Math.random() * 500) + 200;
+      await page.evaluate((amount) => {
+        window.scrollBy({ top: amount, behavior: 'smooth' });
+      }, scrollAmount);
+      await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+    }
+
+    // Mouse movements (triggers engagement events)
+    await page.mouse.move(Math.random() * 800, Math.random() * 600);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await page.mouse.move(Math.random() * 800, Math.random() * 600);
+
+    // Stay on page (GA4 requires 10+ seconds for "engaged session")
+    await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 2000));
+
+    console.log('✓ Simulated human behavior (scrolls, mouse movements, dwell time)');
+  } catch (err) {
+    console.log('Note: Could not simulate some behaviors:', err.message);
+  }
+}
+
+// Random browsing behavior when no user journey is planned
+async function randomBrowsingBehavior(page) {
+  try {
+    // Random scrolling
+    const scrolls = Math.floor(Math.random() * 6) + 3; // 3-8 scrolls
+    for (let i = 0; i < scrolls; i++) {
+      const scrollAmount = Math.floor(Math.random() * 700) + 300;
+      await page.evaluate((amount) => {
+        window.scrollBy({ top: amount, behavior: 'smooth' });
+      }, scrollAmount);
+      await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000));
+    }
+
+    // Try to click random links (2-4 times)
+    const clicks = Math.floor(Math.random() * 3) + 2;
+    for (let i = 0; i < clicks; i++) {
+      try {
+        const clickableElements = await page.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a, button'));
+          return links
+            .filter(el => el.offsetParent !== null && !el.href?.includes('#'))
+            .slice(0, 20)
+            .map((el, idx) => idx);
+        });
+
+        if (clickableElements.length > 0) {
+          const randomIdx = clickableElements[Math.floor(Math.random() * clickableElements.length)];
+          await page.evaluate((idx) => {
+            const elements = Array.from(document.querySelectorAll('a, button'));
+            const el = elements.filter(el => el.offsetParent !== null && !el.href?.includes('#'))[idx];
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, randomIdx);
+
+          await new Promise(resolve => setTimeout(resolve, 800 + Math.random() * 1200));
+
+          await page.evaluate((idx) => {
+            const elements = Array.from(document.querySelectorAll('a, button'));
+            const el = elements.filter(el => el.offsetParent !== null && !el.href?.includes('#'))[idx];
+            if (el) {
+              el.click();
+              return true;
+            }
+            return false;
+          }, randomIdx);
+
+          console.log('✓ Clicked random element');
+          await new Promise(resolve => setTimeout(resolve, 3000 + Math.random() * 3000));
+
+          // Simulate behavior on new page
+          await simulateHumanBehavior(page);
+        }
+      } catch (err) {
+        console.log('Could not click random element:', err.message);
+      }
+    }
+
+    // Final dwell time
+    await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
+
+    console.log('✓ Completed random browsing behavior');
+  } catch (err) {
+    console.log('Error during random browsing:', err.message);
+  }
+}
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', features: ['100k+ user agents', 'Google search flow', 'Fingerprinting'] });
+});
+
+// Function to call Bright Data SERP API and get search results
+async function searchWithBrightDataSERP(searchKeyword, geoLocation, serpConfig) {
+  try {
+    const { api_token, customer_id, zone_name, endpoint, port } = serpConfig;
+    
+    // Bright Data SERP API proxy format
+    const proxyUrl = `http://${endpoint}:${port}`;
+    const proxyAuth = `brd-customer-${customer_id}-zone-${zone_name}:${api_token}`;
+    
+    console.log(`[SERP API] Searching for "${searchKeyword}" via Bright Data SERP (geo: ${geoLocation})`);
+    
+    // Build Google search URL
+    const googleUrl = `https://www.google.com/search?q=${encodeURIComponent(searchKeyword)}&gl=${geoLocation.toLowerCase()}&num=10`;
+    
+    // Make request through Bright Data SERP proxy
+    const response = await axios.get(googleUrl, {
+      proxy: {
+        host: endpoint,
+        port: parseInt(port),
+        auth: {
+          username: `brd-customer-${customer_id}-zone-${zone_name}`,
+          password: api_token
+        }
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 30000
+    });
+    
+    // Parse HTML to extract organic search results
+    const html = response.data;
+    const urlRegex = /<a[^>]*href="\/url\?q=([^&"]+)[^"]*"[^>]*>/g;
+    const matches = [];
+    let match;
+    
+    while ((match = urlRegex.exec(html)) !== null) {
+      try {
+        const url = decodeURIComponent(match[1]);
+        // Filter out Google's own URLs
+        if (!url.includes('google.com') && !url.includes('youtube.com') && url.startsWith('http')) {
+          matches.push(url);
+        }
+      } catch (e) {
+        // Skip malformed URLs
+      }
+    }
+    
+    if (matches.length === 0) {
+      console.log('[SERP API] No organic results found, falling back to direct search');
+      return null;
+    }
+    
+    console.log(`[SERP API] Found ${matches.length} organic results`);
+    console.log(`[SERP API] First result: ${matches[0]}`);
+    
+    return matches;
+  } catch (error) {
+    console.error('[SERP API] Error:', error.message);
+    return null;
+  }
+}
+
+async function downloadCrxFromWebStore(extensionId) {
+  return new Promise((resolve, reject) => {
+    const tempDir = path.join('/tmp', 'extensions');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const crxUrl = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=120.0&acceptformat=crx2,crx3&x=id%3D${extensionId}%26uc`;
+    const fileName = path.join(tempDir, `${extensionId}.crx`);
+    const file = fs.createWriteStream(fileName);
+
+    console.log(`Downloading extension ${extensionId} from Chrome Web Store...`);
+
+    https.get(crxUrl, (response) => {
+      if (response.statusCode === 302 || response.statusCode === 301) {
+        https.get(response.headers.location, (redirectResponse) => {
+          redirectResponse.pipe(file);
+          file.on('finish', () => {
+            file.close();
+            console.log(`Extension downloaded successfully to ${fileName}`);
+            resolve(fileName);
+          });
+        }).on('error', (err) => {
+          fs.unlink(fileName, () => {});
+          reject(err);
+        });
+      } else {
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          console.log(`Extension downloaded successfully to ${fileName}`);
+          resolve(fileName);
+        });
+      }
+    }).on('error', (err) => {
+      fs.unlink(fileName, () => {});
+      reject(err);
+    });
+  });
+}
+
+app.post('/api/automate', async (req, res) => {
+  const { url, actions = [], geoLocation, proxy, proxyUsername, proxyPassword, searchKeyword, extensionCrxUrl, userJourney, sessionId, supabaseUrl, supabaseKey, customReferrer, sessionDurationMin, sessionDurationMax, useSerpApi, serpApiProvider, userId, useBrowserAutomation, proxy_provider, browser_ws_endpoint, serp_api_token, serp_customer_id, serp_zone_name, serp_endpoint, serp_port } = req.body;
+
+  console.log(`[DEBUG] Request params - useSerpApi: ${useSerpApi}, useBrowserAutomation: ${useBrowserAutomation}, searchKeyword: ${searchKeyword}, userId: ${userId}`);
+  // Fix geo targeting for Luna proxy
+  let fixedProxy = proxy;
+  let fixedProxyUsername = proxyUsername;
+  if (proxy_provider === 'luna' && geoLocation) {
+    // Ensure proxy string and username include country
+    if (!proxy.includes(`country-${geoLocation}`)) {
+      if (proxy.match(/country-[A-Z]{2}/i)) {
+        fixedProxy = proxy.replace(/country-[A-Z]{2}/i, `country-${geoLocation}`);
+      } else if (proxy.match(/session-[^\s]+/i)) {
+        // Insert country param before session if missing
+        fixedProxy = proxy.replace(/(session-[^\s]+)/i, `country-${geoLocation}-$1`);
+      } else {
+        // If no session param, append country param at the end
+        fixedProxy = proxy.endsWith('/') ? `${proxy}country-${geoLocation}` : `${proxy}-country-${geoLocation}`;
+      }
+    }
+    if (proxyUsername && !proxyUsername.includes(`country-${geoLocation}`)) {
+      if (proxyUsername.match(/country-[A-Z]{2}/i)) {
+        fixedProxyUsername = proxyUsername.replace(/country-[A-Z]{2}/i, `country-${geoLocation}`);
+      } else if (proxyUsername.match(/session-[^\s]+/i)) {
+        fixedProxyUsername = proxyUsername.replace(/(session-[^\s]+)/i, `country-${geoLocation}-$1`);
+      } else {
+        fixedProxyUsername = proxyUsername.endsWith('/') ? `${proxyUsername}country-${geoLocation}` : `${proxyUsername}-country-${geoLocation}`;
+      }
+    }
+  }
+  console.log(`[DEBUG] Proxy params - proxy: ${fixedProxy}, hasProxyUsername: ${!!fixedProxyUsername}, hasProxyPassword: ${!!proxyPassword}, geoLocation: ${geoLocation}`);
+
+  let browser;
+  let page;
+  let crxPath = null;
+  let pluginLoaded = false;
+  // Ensure resource blocking arrays are always defined
+  const allowedSelectors = req.body.allowedSelectors || [];
+  const blockResources = req.body.blockResources || [];
+  const allowedDomains = req.body.allowedDomains || [];
+  let sessionCompleted = false;
+  let sessionStartTime = Date.now();
+
+  // Calculate target session duration (in milliseconds)
+  const minDuration = (sessionDurationMin || 30) * 1000; // Default 30 seconds
+  const maxDuration = (sessionDurationMax || 120) * 1000; // Default 120 seconds
+  const targetDuration = minDuration + Math.random() * (maxDuration - minDuration);
+
+  console.log(`[SESSION] Target duration: ${(targetDuration / 1000).toFixed(2)} seconds`);
+
+  // Create proxy identifier for cookie persistence (using proxy IP or sessionId)
+  const proxyIdentifier = proxy
+    ? proxy.replace(/[^a-zA-Z0-9]/g, '_') // Sanitize proxy URL for filename
+    : sessionId || 'default';
+
+  try {
+    // Download extension WITHOUT proxy (directly from server)
+    if (extensionCrxUrl) {
+      console.log(`[EXTENSION] Received extension ID: ${extensionCrxUrl}`);
+      console.log(`[EXTENSION] Starting download from Chrome Web Store...`);
+      try {
+        crxPath = await downloadCrxFromWebStore(extensionCrxUrl);
+        console.log(`[EXTENSION] ✓ Successfully downloaded to: ${crxPath}`);
+
+        // Verify file exists and has size
+        const stats = fs.statSync(crxPath);
+        console.log(`[EXTENSION] File size: ${(stats.size / 1024).toFixed(2)} KB`);
+      } catch (downloadError) {
+        console.error(`[EXTENSION] ✗ Download failed:`, downloadError.message);
+        console.error(`[EXTENSION] Stack:`, downloadError.stack);
+        // Continue without extension
+        crxPath = null;
+      }
+    } else {
+      console.log(`[EXTENSION] No extension ID provided, skipping download`);
+    }
+
+    const launchArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--window-size=1920,1080',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--ignore-certificate-errors',
+    ];
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use fixed proxy with geo and session parameters)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && fixedProxy && fixedProxyUsername && proxyPassword) {
+      await page.authenticate({ username: fixedProxyUsername, password: proxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Use direct WebSocket endpoint from settings/config
+      if (!browser_ws_endpoint) {
+        throw new Error('No Bright Data WebSocket endpoint provided for Browser Automation API');
+      }
+      
+      console.log(`[BROWSER AUTOMATION] Attempting to connect...`);
+      console.log(`[BROWSER AUTOMATION] Endpoint format: wss://brd-customer-{ID}-zone-{ZONE}:{PASSWORD}@brd.superproxy.io:9222`);
+      
+      // Extract credentials from endpoint for debugging
+      const endpointMatch = browser_ws_endpoint.match(/wss:\/\/(brd-customer-[^-]+)-zone-([^:]+):([^@]+)@/);
+      if (endpointMatch) {
+        console.log(`[BROWSER AUTOMATION] Customer: ${endpointMatch[1]}`);
+        console.log(`[BROWSER AUTOMATION] Zone: ${endpointMatch[2]}`);
+        console.log(`[BROWSER AUTOMATION] Has password: ${endpointMatch[3] ? 'yes' : 'no'}`);
+      }
+      
+      try {
+        browser = await puppeteer.connect({
+          browserWSEndpoint: browser_ws_endpoint,
+          ignoreHTTPSErrors: true,
+          timeout: 60000, // Increased timeout for Bright Data connection
+        });
+        console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+        const pages = await browser.pages();
+        page = pages[0] || await browser.newPage();
+      } catch (browserError) {
+        console.error('[BROWSER AUTOMATION] Connection failed:', browserError.message);
+        console.error('[BROWSER AUTOMATION] Error details:', browserError.code || browserError.name);
+        
+        // Provide detailed error information
+        if (browserError.message.includes('403') || browserError.message.includes('Unauthorized')) {
+          console.error('[BROWSER AUTOMATION] ❌ 403/Unauthorized Error');
+          console.error('[BROWSER AUTOMATION] Solutions to try:');
+          console.error('  1. Verify exact credentials from Bright Data dashboard (copy full WSS URL)');
+          console.error('  2. Zone name: Try "scraping_browser1" or "unblocker"');
+          console.error('  3. Customer ID: Should match dashboard (format: brd-customer-hl_xxxxx)');
+          console.error('  4. Password: Must be the exact token/password from Bright Data');
+          console.error('  5. Verify endpoint port is 9222 (not 33335 or other)');
+          console.error(`[BROWSER AUTOMATION] You provided: ${browser_ws_endpoint.substring(0, 70)}...`);
+        }
+        
+        throw browserError;
+      }
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = fixedProxy ? { args: [`--proxy-server=${fixedProxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // Place the Google search flow logic after browser and page creation
+
+    // Enable request interception for journey-based blocking or resource blocking
+    if (allowedSelectors.length > 0 || blockResources.length > 0) {
+      await page.setRequestInterception(true);
+
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const requestUrl = request.url();
+        const requestDomain = new URL(requestUrl).hostname;
+
+        // Only block resources when on target domain (not during Google search)
+        const isOnTargetDomain = requestDomain.includes(targetDomain) || requestUrl.includes(targetDomain);
+
+        // If user journey defined, block images/stylesheets/fonts ONLY on target site
+        if (allowedSelectors.length > 0 && isOnTargetDomain) {
+          if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            request.abort();
+            return;
+          }
+        }
+
+        // Check if domain is whitelisted for tracking scripts
+        const isAllowedDomain = allowedDomains.some(domain => requestUrl.includes(domain));
+
+        // Block non-essential resources ONLY on target domain, unless from allowed domains
+        if (blockResources.includes(resourceType) && isOnTargetDomain && !isAllowedDomain) {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+
+      if (allowedSelectors.length > 0) {
+        console.log(`Journey mode: Will block images/CSS/fonts on ${targetDomain}. Allowed interactions: ${allowedSelectors.join(', ')}`);
+      }
+      if (blockResources.length > 0) {
+        console.log(`Resource blocking enabled for ${targetDomain}: ${blockResources.join(', ')}`);
+        console.log(`Allowed domains: ${allowedDomains.join(', ')}`);
+      }
+    }
+
+    // Authenticate proxy (use effective credentials which may be SERP API or regular)
+    // Only authenticate proxy for SERP+Luna flow
+    if (!useBrowserAutomation && effectiveProxy && effectiveProxyUsername && effectiveProxyPassword) {
+      await page.authenticate({ username: effectiveProxyUsername, password: effectiveProxyPassword });
+      console.log(`[PROXY] ✓ Authenticated with proxy using ${useSerpApi && searchKeyword ? 'SERP API' : 'regular'} credentials`);
+    }
+    // For Browser Automation API, skip proxy authentication and setup
+    if (useBrowserAutomation) {
+      // Build Bright Data WebSocket endpoint from config or request
+      const customerId = req.body.browser_customer_id || process.env.BRIGHTDATA_CUSTOMER_ID;
+      const zone = req.body.browser_zone || process.env.BRIGHTDATA_ZONE || 'unblocker';
+      const country = geoLocation || 'US';
+      const password = req.body.browser_password || process.env.BRIGHTDATA_PASSWORD;
+      const endpoint = req.body.browser_endpoint || process.env.BRIGHTDATA_ENDPOINT || 'brd.superproxy.io';
+      const port = req.body.browser_port || process.env.BRIGHTDATA_PORT || '9222';
+      const brightDataWsEndpoint = `wss://brd-customer-${customerId}-zone-${zone}-country-${country}:${password}@${endpoint}:${port}`;
+      console.log(`[BROWSER AUTOMATION] Connecting to Bright Data Browser Automation API...`);
+      browser = await puppeteer.connect({
+        browserWSEndpoint: brightDataWsEndpoint,
+        ignoreHTTPSErrors: true,
+      });
+      console.log('[BROWSER AUTOMATION] ✓ Connected to Bright Data remote browser');
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    } else {
+      // Launch browser with proxy for SERP API or regular automation
+      const proxyOptions = proxy ? { args: [`--proxy-server=${proxy}`] } : {};
+      browser = await puppeteer.launch({
+        headless: true,
+        ignoreHTTPSErrors: true,
+        ...proxyOptions,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1920,1080',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--ignore-certificate-errors',
+        ],
+      });
+
+      const pages = await browser.pages();
+      page = pages[0] || await browser.newPage();
+    }
+
+    // DUAL-PROXY FLOW: Use Bright Data SERP API + Luna Proxy
+    let clickedUrl = url; // Default to target URL
+    let usedSerpApi = false;
+    
+    if (useSerpApi && searchKeyword && serp_api_token && serp_customer_id) {
+      // Step 1: Use Bright Data SERP API to get search results
+      const serpConfig = {
+        api_token: serp_api_token,
+        customer_id: serp_customer_id,
+        zone_name: serp_zone_name || 'serp',
+        endpoint: serp_endpoint || 'brd.superproxy.io',
+        port: serp_port || '33335'
+      };
+      
+      const searchResults = await searchWithBrightDataSERP(searchKeyword, geoLocation, serpConfig);
+      
+      if (searchResults && searchResults.length > 0) {
+        // Find our target URL in results, or use first result
+        const targetDomain = new URL(url).hostname.replace('www.', '');
+        let foundUrl = searchResults.find(resultUrl => {
+          try {
+            const resultDomain = new URL(resultUrl).hostname.replace('www.', '');
+            return resultDomain.includes(targetDomain) || targetDomain.includes(resultDomain);
+          } catch {
+            return false;
+          }
+        });
+        
+        if (!foundUrl) {
+          // If target not found in results, pick a random result from top 5
+          const randomIdx = Math.floor(Math.random() * Math.min(5, searchResults.length));
+          foundUrl = searchResults[randomIdx];
+          console.log(`[SERP API] Target URL not found in results, using result #${randomIdx + 1}: ${foundUrl}`);
+        } else {
+          console.log(`[SERP API] Found target URL in search results: ${foundUrl}`);
+        }
+        
+        clickedUrl = foundUrl;
+        usedSerpApi = true;
+        
+        // Update session with clicked URL
+        if (supabaseUrl && supabaseKey && sessionId) {
+          try {
+            await fetch(`${supabaseUrl}/rest/v1/bot_sessions?id=eq.${sessionId}`, {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({ clicked_url: clickedUrl })
+            });
+            console.log(`[SERP API] Updated session with clicked URL`);
+          } catch (err) {
+            console.log(`[SERP API] Could not update clicked URL: ${err.message}`);
+          }
+        }
+        
+        // Close SERP browser if we used it
+        if (browser && !useBrowserAutomation) {
+          await browser.close();
+          browser = null;
+          page = null;
+          console.log('[SERP API] Closed SERP browser, will launch new browser with Luna proxy');
+        }
+      } else {
+        console.log('[SERP API] No results from SERP API, falling back to direct navigation');
+      }
+    }
+    
+    // Step 2: Launch browser with Luna proxy (if SERP API was used OR direct traffic)
+    if (usedSerpApi || !useBrowserAutomation) {
+      // For SERP flow: launch new browser with Luna proxy
+      // For direct flow: use existing browser or launch with proxy
+      if (!browser) {
+        const proxyOptions = fixedProxy ? { args: [`--proxy-server=${fixedProxy}`] } : {};
+        browser = await puppeteer.launch({
+          headless: true,
+          ignoreHTTPSErrors: true,
+          ...proxyOptions,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--window-size=1920,1080',
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--ignore-certificate-errors',
+          ],
+        });
+
+        const pages = await browser.pages();
+        page = pages[0] || await browser.newPage();
+        
+        // Authenticate Luna proxy
+        if (fixedProxy && fixedProxyUsername && proxyPassword) {
+          await page.authenticate({ username: fixedProxyUsername, password: proxyPassword });
+          console.log(`[LUNA PROXY] ✓ Authenticated with Luna proxy`);
+        }
+      }
+    }
+
+    // Navigate to target URL (either clicked URL from SERP or original target)
+    console.log(`[NAVIGATION] Navigating to: ${clickedUrl}`);
+    await page.goto(clickedUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+    console.log(`✓ Loaded ${clickedUrl}`);
+
+    // Execute user journey or random browsing behavior
+    if (userJourney && userJourney.length > 0) {
+      console.log('Starting user journey...');
+      for (const action of userJourney) {
+        const { type, selector, url, waitForSelector, delay } = action;
+
+        try {
+          if (type === 'navigate' && url) {
+            await page.goto(url, { waitUntil: 'networkidle2' });
+            console.log(`✓ Navigated to ${url}`);
+          } else if (type === 'click' && selector) {
+            await page.click(selector);
+            console.log(`✓ Clicked on element: ${selector}`);
+          } else if (type === 'type' && selector && action.text) {
+            await page.type(selector, action.text, { delay: 100 });
+            console.log(`✓ Typed text into element: ${selector}`);
+          } else if (type === 'wait' && waitForSelector) {
+            await page.waitForSelector(waitForSelector);
+            console.log(`✓ Waited for element: ${waitForSelector}`);
+          }
+
+          // Random delay between actions
+          if (delay) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (err) {
+          console.log(`Error executing action ${JSON.stringify(action)}: ${err.message}`);
+        }
+      }
+      console.log('✓ User journey completed');
+    } else {
+      console.log('No user journey defined, performing random browsing behavior');
+      await randomBrowsingBehavior(page);
+    }
+
+    // Final wait to simulate session duration
+    await new Promise(resolve => setTimeout(resolve, targetDuration));
+
+    sessionCompleted = true;
+    console.log('✓ Session completed successfully');
+    res.json({ success: true, message: 'Automation completed', sessionId });
+  } catch (error) {
+    // Mark session as failed in Supabase
+    try {
+      const supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/sessions?id=eq.${sessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${supabaseKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId,
+          update: {
+            status: 'failed',
+            error_message: error.message,
+            completed_at: new Date().toISOString(),
+          }
+        })
+      });
+      console.log('✓ Session marked as failed');
+    } catch (err) {
+      console.error('Failed to mark session as failed:', err.message);
+    }
+
+    console.error('Automation error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.listen(3000, () => {
+  console.log('Puppeteer server running on port 3000 with Google search support');
+});

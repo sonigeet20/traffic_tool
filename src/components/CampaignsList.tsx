@@ -43,6 +43,32 @@ export default function CampaignsList({
       setStartingCampaign(campaign.id);
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        let body: any = { campaignId: campaign.id };
+        
+        // Get the current user for config
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: config } = await supabase
+            .from('bright_data_serp_config')
+            .select('browser_ws_endpoint, api_token, customer_id, zone_name, endpoint, port')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          
+          // If browser automation is enabled AND SERP API is NOT enabled, add browser_ws_endpoint
+          if (campaign.use_browser_automation && !campaign.use_serp_api && config && config.browser_ws_endpoint) {
+            body.browser_ws_endpoint = config.browser_ws_endpoint;
+          }
+          
+          // If SERP API is enabled, add SERP credentials (disables Browser Automation)
+          if (campaign.use_serp_api && config && config.api_token && config.customer_id) {
+            body.serp_api_token = config.api_token;
+            body.serp_customer_id = config.customer_id;
+            body.serp_zone_name = config.zone_name || 'serp';
+            body.serp_endpoint = config.endpoint || 'brd.superproxy.io';
+            body.serp_port = config.port || '33335';
+          }
+        }
+        
         const response = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-campaign`,
           {
@@ -51,7 +77,7 @@ export default function CampaignsList({
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${session?.access_token}`,
             },
-            body: JSON.stringify({ campaignId: campaign.id }),
+            body: JSON.stringify(body),
           }
         );
 

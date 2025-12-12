@@ -19,9 +19,11 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
   const [metrics, setMetrics] = useState<PerformanceMetric[]>([]);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
+  const [browserApiConfig, setBrowserApiConfig] = useState<any>(null);
 
   useEffect(() => {
     loadData();
+    loadBrowserApiConfig();
     const dataInterval = setInterval(loadData, 5000);
     const completeInterval = setInterval(async () => {
       await supabase.rpc('auto_complete_sessions');
@@ -31,6 +33,44 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       clearInterval(completeInterval);
     };
   }, [campaign.id]);
+
+  async function loadBrowserApiConfig() {
+    console.log('[DEBUG loadBrowserApiConfig] Starting fetch...');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('[DEBUG loadBrowserApiConfig] No user found');
+        return null;
+      }
+
+      const { data, error } = await supabase
+        .from('serp_configs')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (error) {
+        console.error('[DEBUG loadBrowserApiConfig] Error fetching config:', error.message);
+        return null;
+      }
+
+      if (data) {
+        console.log('[DEBUG loadBrowserApiConfig] ✓ Config loaded successfully:', {
+          browser_customer_id: (data as any).browser_customer_id ? '✓' : '✗',
+          browser_zone: (data as any).browser_zone || 'unblocker',
+          has_username: !!(data as any).browser_username ? '✓' : '✗',
+          has_password: !!(data as any).browser_password ? '✓' : '✗'
+        });
+        setBrowserApiConfig(data);
+        return data;
+      }
+      console.log('[DEBUG loadBrowserApiConfig] No config found in database');
+      return null;
+    } catch (err) {
+      console.error('[DEBUG loadBrowserApiConfig] Exception:', (err as any).message);
+      return null;
+    }
+  }
 
   async function loadData() {
     const { data: sessionsData } = await supabase
@@ -42,7 +82,7 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
     if (sessionsData) {
       setSessions(sessionsData);
 
-      const sessionIds = sessionsData.map((s) => s.id);
+      const sessionIds = (sessionsData as any[]).map((s: any) => s.id);
       if (sessionIds.length > 0) {
         const { data: metricsData } = await supabase
           .from('performance_metrics')
@@ -57,6 +97,12 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
   }
 
   async function runSession() {
+    // ALWAYS fetch fresh Browser API config before each session
+    // This ensures credentials are always available
+    console.log('[DEBUG runSession] Loading fresh Browser API config...');
+    const freshConfig = await loadBrowserApiConfig();
+    console.log('[DEBUG runSession] Fresh config loaded:', freshConfig ? 'YES' : 'NO');
+    
     const bounceRate = campaign.bounce_rate || 30;
     const shouldBounce = Math.random() * 100 < bounceRate;
 
@@ -73,17 +119,44 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
     const geoLocation = geoLocations[Math.floor(Math.random() * geoLocations.length)];
     const sessionId = crypto.randomUUID();
 
-    const trafficDist = campaign.traffic_source_distribution || { direct: 50, search: 50 };
+    // Parse traffic distribution - handle both object and parsed JSON
+    let trafficDist = campaign.traffic_source_distribution;
+    if (typeof trafficDist === 'string') {
+      try {
+        trafficDist = JSON.parse(trafficDist);
+      } catch (e) {
+        trafficDist = { direct: 50, search: 50 };
+      }
+    }
+    if (!trafficDist) {
+      trafficDist = { direct: 50, search: 50 };
+    }
+    
+    console.log('[DEBUG] Raw campaign.traffic_source_distribution:', campaign.traffic_source_distribution);
+    console.log('[DEBUG] After parsing - trafficDist:', trafficDist);
+    
+    // Normalize: if user set search to 100, make direct 0
+    const searchPercent = (trafficDist as any)?.search || 50;
+    const directPercent = 100 - searchPercent; // Calculate from search, don't use stored direct
     const trafficRoll = Math.random() * 100;
-    const isSearchTraffic = trafficRoll > (trafficDist.direct || 50);
+    const isSearchTraffic = trafficRoll <= searchPercent; // Roll in search range = search traffic
     const trafficSource = isSearchTraffic ? 'search' : 'direct';
+
+    console.log(`[DEBUG runSession] Traffic Distribution Raw:`, trafficDist);
+    console.log(`[DEBUG runSession] Calculated - Direct: ${directPercent}%, Search: ${searchPercent}%`);
+    console.log(`[DEBUG runSession] Random roll: ${trafficRoll.toFixed(1)}% <= ${searchPercent}% threshold? ${isSearchTraffic ? 'YES = SEARCH' : 'NO = DIRECT'}`);
 
     const searchKeywords = campaign.search_keywords || [];
     const searchKeyword = searchKeywords.length > 0
       ? searchKeywords[Math.floor(Math.random() * searchKeywords.length)]
       : null;
 
-    await supabase.from('bot_sessions').insert({
+    // DEBUG: Log session initialization
+    console.log(`[DEBUG runSession] sessionId=${sessionId}, isSearchTraffic=${isSearchTraffic}, searchKeyword=${searchKeyword}`);
+    console.log(`[DEBUG runSession] browserApiConfig exists=${!!browserApiConfig}, campaign.use_luna_proxy_search=${campaign.use_luna_proxy_search}`);
+    console.log(`[DEBUG runSession] campaign.proxy_provider=${campaign.proxy_provider}`);
+
+    await (supabase.from('bot_sessions').insert as any)({
       id: sessionId,
       campaign_id: campaign.id,
       status: 'running',
@@ -104,10 +177,15 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
     });
 
     const payload: any = {
-      url: isSearchTraffic ? 'https://www.google.com' : campaign.target_url,
+      url: campaign.target_url,
       geoLocation,
       waitUntil: 'networkidle2',
       actions: [],
+      searchKeyword: isSearchTraffic ? searchKeyword : undefined,
+      isSearchTraffic,
+      sessionDurationMin: campaign.session_duration_min || 30,
+      sessionDurationMax: campaign.session_duration_max || 120,
+      useLunaProxySearch: false, // Default to false, will be set to true if conditions met
     };
 
     if (isSearchTraffic && searchKeyword) {
@@ -151,15 +229,93 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       payload.actions.push({ type: 'wait', duration: sessionDuration });
     }
 
-    if (campaign.use_residential_proxies && campaign.proxy_username && campaign.proxy_password) {
+    const hasProxyCreds = campaign.proxy_username && campaign.proxy_password;
+    if (hasProxyCreds) {
       payload.proxy = `http://${campaign.proxy_host || 'pr.lunaproxy.com'}:${campaign.proxy_port || '12233'}`;
-      payload.proxyUsername = `${campaign.proxy_username}-region-us-session-${sessionId.substring(0, 8)}`;
+      payload.proxyUsername = campaign.proxy_username;
       payload.proxyPassword = campaign.proxy_password;
+    }
+
+    // Use Browser API for search traffic when enabled (replaces Luna proxy for search)
+    // Browser API credentials take precedence - if they exist, use them for search
+    console.log('[DEBUG] Before Browser API check - freshConfig:', freshConfig ? 'EXISTS' : 'NULL');
+    console.log('[DEBUG] Before Browser API check - browserApiConfig:', browserApiConfig ? 'EXISTS' : 'NULL');
+    
+    // Use the freshly loaded config as primary, fallback to state browserApiConfig
+    const finalConfig = freshConfig || browserApiConfig;
+    console.log('[DEBUG] Final config to use:', finalConfig ? 'EXISTS' : 'NULL');
+    
+    if (isSearchTraffic && searchKeyword && finalConfig) {
+      console.log('[DEBUG] ✓ All conditions met for Browser API search');
+      console.log('[DEBUG] finalConfig contains:', {
+        browser_customer_id: (finalConfig as any).browser_customer_id,
+        browser_username: (finalConfig as any).browser_username,
+        browser_zone: (finalConfig as any).browser_zone,
+        browser_password: (finalConfig as any).browser_password ? '***' : 'MISSING'
+      });
+      
+      payload.useLunaProxySearch = true;
+      
+      // Include Browser API credentials for search
+      payload.browser_customer_id = (finalConfig as any).browser_customer_id;
+      payload.browser_username = (finalConfig as any).browser_username;
+      payload.browser_zone = (finalConfig as any).browser_zone || 'unblocker';
+      payload.browser_password = (finalConfig as any).browser_password;
+      payload.browser_api_token = (finalConfig as any).browser_api_token;
+      payload.browser_endpoint = (finalConfig as any).browser_endpoint || 'brd.superproxy.io';
+      payload.browser_port = (finalConfig as any).browser_port || '9222';
+      
+      console.log('[DEBUG] ✓ Payload updated with Browser API credentials:', {
+        browser_customer_id: !!payload.browser_customer_id,
+        browser_username: !!payload.browser_username,
+        browser_password: !!payload.browser_password,
+        browser_api_token: !!payload.browser_api_token,
+        useLunaProxySearch: payload.useLunaProxySearch
+      });
+    } else {
+      console.log('[DEBUG] Browser API conditions NOT met:');
+      console.log('[DEBUG]   isSearchTraffic:', isSearchTraffic);
+      console.log('[DEBUG]   searchKeyword:', searchKeyword);
+      console.log('[DEBUG]   freshConfig:', freshConfig ? 'LOADED' : 'NULL');
+      console.log('[DEBUG]   browserApiConfig:', browserApiConfig ? 'EXISTS' : 'NULL');
+    }
+
+    // Use Browser Automation for direct traffic if enabled
+    if (!isSearchTraffic && campaign.use_browser_automation && finalConfig) {
+      payload.useBrowserAutomation = true;
+      payload.browser_customer_id = (finalConfig as any).browser_customer_id;
+      payload.browser_username = (finalConfig as any).browser_username;
+      payload.browser_zone = finalConfig.browser_zone || 'unblocker';
+      payload.browser_password = (finalConfig as any).browser_password;
+      payload.browser_api_token = (finalConfig as any).browser_api_token;
+      payload.browser_endpoint = (finalConfig as any).browser_endpoint || 'brd.superproxy.io';
+      payload.browser_port = (finalConfig as any).browser_port || '9222';
     }
 
     if (campaign.extension_crx_url) {
       payload.extensionId = campaign.extension_crx_url;
     }
+
+    console.log('[DEBUG PAYLOAD]', {
+      searchKeyword: payload.searchKeyword,
+      isSearchTraffic: payload.isSearchTraffic,
+      useLunaProxySearch: payload.useLunaProxySearch,
+      has_browser_customer_id: !!payload.browser_customer_id,
+      has_browser_username: !!payload.browser_username,
+      has_browser_password: !!payload.browser_password,
+      campaign_use_luna_proxy_search: campaign.use_luna_proxy_search
+    });
+
+    console.log('[DEBUG PAYLOAD FINAL] About to send to backend:', {
+      searchKeyword: payload.searchKeyword,
+      useLunaProxySearch: payload.useLunaProxySearch,
+      browser_customer_id: payload.browser_customer_id,
+      browser_username: payload.browser_username,
+      browser_password: payload.browser_password ? '***' : undefined,
+      browser_zone: payload.browser_zone,
+      browser_endpoint: payload.browser_endpoint,
+      browser_port: payload.browser_port
+    });
 
     fetch('http://13.218.100.97:3000/api/automate', {
       method: 'POST',
@@ -172,9 +328,9 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
     const isActive = campaign.status === 'active';
 
     if (isActive) {
-      await supabase
+      await (supabase
         .from('campaigns')
-        .update({ status: 'paused' })
+        .update as any)({ status: 'paused' })
         .eq('id', campaign.id);
       await loadData();
       if (onRefresh) onRefresh();
@@ -183,16 +339,22 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
 
     setExecuting(true);
     try {
-      await supabase
+      // Ensure Browser API config is loaded before starting sessions
+      if (!browserApiConfig && campaign.use_luna_proxy_search) {
+        console.log('[DEBUG] Loading Browser API config before starting sessions');
+        await loadBrowserApiConfig();
+      }
+
+      await (supabase
         .from('campaigns')
-        .update({ status: 'active', started_at: new Date().toISOString() })
+        .update as any)({ status: 'active', started_at: new Date().toISOString() })
         .eq('id', campaign.id);
 
       const sessionsPerHour = campaign.sessions_per_hour || 10;
       const intervalMs = (60 * 60 * 1000) / sessionsPerHour;
 
       for (let i = 0; i < 5; i++) {
-        runSession();
+        await runSession();
         await new Promise(resolve => setTimeout(resolve, intervalMs));
       }
 
@@ -386,7 +548,7 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
                 <div className="text-right">
                   <div className="text-slate-400 text-sm">{session.status}</div>
                   <div className="text-slate-500 text-xs">
-                    {new Date(session.created_at).toLocaleTimeString()}
+                    {new Date((session as any).created_at).toLocaleTimeString()}
                   </div>
                 </div>
               </div>

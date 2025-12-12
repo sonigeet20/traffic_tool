@@ -167,14 +167,9 @@ async function executeHourlyBatch(
   puppeteerServerUrl: string
 ) {
   const targetGeoLocations = campaign.target_geo_locations || ['US'];
-  const trafficSourceDist = campaign.traffic_source_distribution || { direct: 50, search: 50 };
+  const campaignType = campaign.campaign_type || 'direct'; // default to 'direct' for backward compatibility
   const searchKeywords = campaign.search_keywords || [];
-  const useSerpApi = campaign.use_serp_api || false;
-  const useProxies = campaign.use_residential_proxies || false;
-  const proxyUsername = campaign.proxy_username;
-  const proxyPassword = campaign.proxy_password;
-  const proxyHost = campaign.proxy_host || 'pr.lunaproxy.com';
-  const proxyPort = campaign.proxy_port || '12233';
+  
   const extensionCrxUrl = campaign.extension_crx_url;
   const bounceRate = campaign.bounce_rate || 30;
   const sessionDurationMin = (campaign.session_duration_min || 30) * 1000;
@@ -187,6 +182,61 @@ async function executeHourlyBatch(
     .eq('campaign_id', campaign.id)
     .order('step_order', { ascending: true });
 
+  // ═══════════════════════════════════════════════════════════
+  // Fetch credentials based on campaign type
+  // ═══════════════════════════════════════════════════════════
+  let browserApiConfig = null;
+  let lunaProxyConfig = null;
+  
+  if (campaignType === 'search') {
+    // Search campaigns use Browser API exclusively
+    const { data: config } = await supabase
+      .from('bright_data_serp_config')
+      .select('browser_api_token, browser_zone, browser_customer_id, browser_username, browser_password, browser_endpoint, browser_port')
+      .eq('user_id', campaign.user_id)
+      .maybeSingle();
+    
+    if (config && config.browser_zone) {
+      // Auto-extract customer ID from username if not explicitly set
+      let customerId = config.browser_customer_id;
+      if (!customerId && config.browser_username) {
+        // Extract from format: brd-customer-hl_a908b07a-zone-scraping_browser1
+        const match = config.browser_username.match(/(brd-customer-[a-z0-9_]+)/);
+        customerId = match ? match[1] : null;
+      }
+
+      browserApiConfig = {
+        browser_api_token: config.browser_api_token || null,
+        browser_zone: config.browser_zone,
+        browser_customer_id: customerId || null,
+        browser_username: config.browser_username || null,
+        browser_password: config.browser_password || null,
+        browser_endpoint: config.browser_endpoint || 'brd.superproxy.io',
+        browser_port: config.browser_port || '9222'
+      };
+      console.log(`[SCHEDULER] ✓ Search Campaign - Browser API Zone: ${config.browser_zone}`);
+      console.log(`[SCHEDULER]   - Customer ID: ${customerId ? 'YES' : 'NO'}`);
+      console.log(`[SCHEDULER]   - Username: ${config.browser_username ? 'YES' : 'NO'}`);
+      console.log(`[SCHEDULER]   - Password: ${config.browser_password ? 'YES' : 'NO'}`);
+    } else {
+      console.error(`[SCHEDULER] ✗ Search campaign ${campaign.id} missing Browser API credentials`);
+      return; // Cannot proceed without Browser API for search campaigns
+    }
+  } else {
+    // Direct campaigns use Luna Proxy exclusively
+    if (campaign.proxy_username && campaign.proxy_password) {
+      lunaProxyConfig = {
+        proxy: `http://${campaign.proxy_host || 'pr.lunaproxy.com'}:${campaign.proxy_port || '12233'}`,
+        proxyUsername: campaign.proxy_username,
+        proxyPassword: campaign.proxy_password
+      };
+      console.log(`[SCHEDULER] ✓ Direct Campaign - Luna Proxy: ${campaign.proxy_host}`);
+    } else {
+      console.error(`[SCHEDULER] ✗ Direct campaign ${campaign.id} missing Luna proxy credentials`);
+      return; // Cannot proceed without Luna credentials for direct campaigns
+    }
+  }
+
   const getGeoCode = (location: string) => {
     const geoMap: Record<string, string> = {
       'US': 'us', 'CA': 'ca', 'GB': 'gb', 'DE': 'de', 'FR': 'fr',
@@ -198,27 +248,24 @@ async function executeHourlyBatch(
   for (let i = 0; i < sessionsToRun; i++) {
     const sessionId = crypto.randomUUID();
     const geoLocation = targetGeoLocations[Math.floor(Math.random() * targetGeoLocations.length)];
-    const rand = Math.random() * 100;
-    const trafficSource = rand < trafficSourceDist.direct ? 'direct' : 'search';
-    const searchKeyword = trafficSource === 'search' && searchKeywords.length > 0
+    
+    // Traffic source is determined by campaign type
+    const trafficSource = campaignType; // 'search' or 'direct'
+    const searchKeyword = campaignType === 'search' && searchKeywords.length > 0
       ? searchKeywords[Math.floor(Math.random() * searchKeywords.length)]
       : null;
 
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
     let proxyIP = 'None';
     let proxyType = 'none';
-    let willUseProxy = false;
 
-    if (useSerpApi && trafficSource === 'search' && searchKeyword) {
-      // Use Bright Data for search traffic
-      proxyIP = 'Bright Data (SERP)';
-      proxyType = 'serp_api';
-      willUseProxy = false;  // Bright Data config comes from bright_data_serp_config table
-    } else if (useProxies && proxyUsername && proxyPassword && proxyUsername.trim() && proxyPassword.trim()) {
-      // Use Luna proxy for direct traffic (or all traffic if SERP API not enabled)
-      proxyIP = `Luna Proxy (${getGeoCode(geoLocation)})`;
-      proxyType = 'residential';
-      willUseProxy = true;
+    // Set proxy info based on campaign type
+    if (campaignType === 'search' && browserApiConfig) {
+      proxyIP = `Browser API (${browserApiConfig.browser_zone})`;
+      proxyType = 'browser_api';
+    } else if (campaignType === 'direct' && lunaProxyConfig) {
+      proxyIP = lunaProxyConfig.proxy;
+      proxyType = 'luna_residential';
     }
 
     const shouldBounce = Math.random() * 100 < bounceRate;
@@ -244,7 +291,6 @@ async function executeHourlyBatch(
       started_at: new Date().toISOString(),
     });
 
-    const startTime = Date.now();
     const waitTime = shouldBounce ? bounceDuration : sessionDuration;
 
     const requestPayload: any = {
@@ -260,27 +306,28 @@ async function executeHourlyBatch(
       customReferrer: customReferrer || null,
       sessionDurationMin: campaign.session_duration_min || 30,
       sessionDurationMax: campaign.session_duration_max || 120,
-      useSerpApi: campaign.use_serp_api || false,
-      serpApiProvider: campaign.serp_api_provider || 'bright_data',
-      userId: campaign.user_id
+      userId: campaign.user_id,
+      campaignType: campaignType, // Add campaign type to payload
     };
 
-    if (trafficSource === 'search' && searchKeyword) {
-      requestPayload.searchKeyword = searchKeyword;
-    }
-
-    // Apply Luna proxy credentials
-    // - For search traffic with SERP API: Used after clicking search result
-    // - For direct traffic: Used for entire session
-    // - For search without SERP API: Used for entire session
-    if (useProxies && proxyUsername && proxyPassword && proxyUsername.trim() && proxyPassword.trim()) {
-      const geoCode = getGeoCode(geoLocation);
-      const sessionKey = sessionId.substring(0, 8);
-      const lunaUsername = `${proxyUsername}-region-${geoCode}-session-${sessionKey}`;
-      requestPayload.proxy = `http://${proxyHost}:${proxyPort}`;
-      requestPayload.proxyUsername = lunaUsername;
-      requestPayload.proxyPassword = proxyPassword;
-      console.log(`[SCHEDULER] Luna proxy configured for session ${sessionId}: ${lunaUsername}`);
+    // Add credentials based on campaign type
+    if (campaignType === 'search' && browserApiConfig) {
+      requestPayload.browser_api_token = browserApiConfig.browser_api_token;
+      requestPayload.browser_zone = browserApiConfig.browser_zone;
+      requestPayload.browser_customer_id = browserApiConfig.browser_customer_id;
+      requestPayload.browser_username = browserApiConfig.browser_username;
+      requestPayload.browser_password = browserApiConfig.browser_password;
+      requestPayload.browser_endpoint = browserApiConfig.browser_endpoint;
+      requestPayload.browser_port = browserApiConfig.browser_port;
+      requestPayload.searchKeyword = searchKeyword; // Required for search campaigns
+      
+      console.log(`[SCHEDULER] Session ${sessionId.substring(0, 8)} - Search campaign via Browser API (keyword: ${searchKeyword})`);
+    } else if (campaignType === 'direct' && lunaProxyConfig) {
+      requestPayload.proxy = lunaProxyConfig.proxy;
+      requestPayload.proxyUsername = lunaProxyConfig.proxyUsername;
+      requestPayload.proxyPassword = lunaProxyConfig.proxyPassword;
+      
+      console.log(`[SCHEDULER] Session ${sessionId.substring(0, 8)} - Direct campaign via Luna Proxy`);
     }
 
     fetch(`${puppeteerServerUrl}/api/automate`, {

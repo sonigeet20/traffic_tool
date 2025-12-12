@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   concurrent_bots integer DEFAULT 1,
   session_duration_min integer DEFAULT 30,
   session_duration_max integer DEFAULT 300,
+  use_luna_proxy_search boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now(),
   started_at timestamptz,

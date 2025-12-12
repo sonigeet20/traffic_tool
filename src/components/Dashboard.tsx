@@ -5,6 +5,7 @@ import CampaignsList from './CampaignsList';
 import CampaignForm from './CampaignForm';
 import CampaignDetails from './CampaignDetails';
 import AnalyticsDashboard from './AnalyticsDashboard';
+import BrowserApiCredentials from './BrowserApiCredentials';
 import { Activity, Plus, BarChart3, LogOut, Settings } from 'lucide-react';
 import SerpConfig from './SerpConfig';
 
@@ -198,12 +199,19 @@ export default function Dashboard() {
         )}
 
         {currentView === 'settings' && (
-          <div>
-            <div className="mb-6">
+          <div className="space-y-8">
+            <div>
               <h2 className="text-2xl font-bold text-white mb-2">Settings</h2>
               <p className="text-slate-400">Configure integrations and advanced options</p>
             </div>
-            <SerpConfig />
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Bright Data Browser API</h3>
+              <BrowserApiCredentials />
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">SERP API Configuration</h3>
+              <SerpConfig />
+            </div>
           </div>
         )}
       </main>

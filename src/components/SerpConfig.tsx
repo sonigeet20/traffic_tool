@@ -10,6 +10,15 @@ interface SerpConfigData {
   endpoint: string;
   port: string;
   enabled: boolean;
+  use_browser_automation: boolean;
+  browser_zone: string;
+  browser_customer_id: string;
+  browser_username: string;
+  browser_password: string;
+  browser_api_token: string;
+  browser_endpoint: string;
+  browser_port: string;
+  browser_ws_endpoint: string;
 }
 
 export default function SerpConfig() {
@@ -21,6 +30,15 @@ export default function SerpConfig() {
     endpoint: 'brd.superproxy.io',
     port: '33335',
     enabled: false,
+    use_browser_automation: false,
+    browser_zone: 'unblocker',
+    browser_customer_id: '',
+    browser_username: '',
+    browser_password: '',
+    browser_api_token: '',
+    browser_endpoint: 'brd.superproxy.io',
+    browser_port: '9222',
+    browser_ws_endpoint: '',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,6 +73,15 @@ export default function SerpConfig() {
           endpoint: data.endpoint || 'brd.superproxy.io',
           port: data.port || '33335',
           enabled: data.enabled || false,
+          use_browser_automation: data.use_browser_automation || false,
+          browser_zone: data.browser_zone || 'unblocker',
+          browser_customer_id: data.browser_customer_id || '',
+          browser_username: data.browser_username || '',
+          browser_password: data.browser_password || '',
+          browser_api_token: data.browser_api_token || '',
+          browser_endpoint: data.browser_endpoint || 'brd.superproxy.io',
+          browser_port: data.browser_port || '9222',
+          browser_ws_endpoint: data.browser_ws_endpoint || '',
         });
       }
     } catch (err) {
@@ -84,6 +111,15 @@ export default function SerpConfig() {
           endpoint: config.endpoint,
           port: config.port,
           enabled: config.enabled,
+          use_browser_automation: config.use_browser_automation,
+          browser_zone: config.browser_zone,
+          browser_customer_id: config.browser_customer_id,
+          browser_username: config.browser_username,
+          browser_password: config.browser_password,
+          browser_api_token: config.browser_api_token,
+          browser_endpoint: config.browser_endpoint,
+          browser_port: config.browser_port,
+          browser_ws_endpoint: config.browser_ws_endpoint,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'user_id'
@@ -277,6 +313,190 @@ export default function SerpConfig() {
               <span className="font-medium text-blue-300">How it works:</span> SERP proxies are optimized for Google searches with automatic geo-targeting per campaign. Each session gets a unique IP from the target country.
             </p>
           </div>
+        </div>
+
+        <div className="bg-slate-900/60 border border-slate-700 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4 text-cyan-400" />
+            <div>
+              <h4 className="text-sm font-semibold text-white">Browser Automation API (Bright Data)</h4>
+              <p className="text-xs text-slate-400">Single remote browser handles Google search, results, and target navigation (no proxy switching).</p>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.use_browser_automation}
+              onChange={(e) => setConfig({ ...config, use_browser_automation: e.target.checked })}
+              className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-slate-900"
+            />
+            <span className="text-sm font-medium text-slate-300">Enable Browser Automation</span>
+          </label>
+
+          {config.use_browser_automation ? (
+            <div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">API Token (HTTP API) 🔑</label>
+                <input
+                  type="password"
+                  value={config.browser_api_token}
+                  onChange={(e) => setConfig({ ...config, browser_api_token: e.target.value })}
+                  placeholder="cb3070be589695116882cfd8f6a37d4e3c0d19fe..."
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">64-character hex token for HTTP API (primary method - faster, no CAPTCHA)</p>
+              </div>
+              
+              <div className="mt-3 pt-3 border-t border-slate-700">
+                <label className="block text-sm font-medium text-slate-300 mb-2">Bright Data WebSocket Endpoint (Optional Fallback)</label>
+                <input
+                  type="text"
+                  value={config.browser_ws_endpoint}
+                  onChange={(e) => setConfig({ ...config, browser_ws_endpoint: e.target.value })}
+                  placeholder="wss://brd-customer-...-zone-...:PASSWORD@brd.superproxy.io:9222"
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-xs text-slate-500 mt-1">Full WebSocket endpoint (only used if HTTP API fails)</p>
+              </div>
+              
+              <div className="bg-slate-800/50 border border-slate-700 rounded p-3 mt-3 mb-4">
+                <p className="text-xs text-slate-400 mb-2"><span className="font-semibold text-slate-300">Troubleshooting 403 Errors:</span></p>
+                <ul className="text-xs text-slate-500 space-y-1 list-disc list-inside">
+                  <li>Verify zone name in endpoint (e.g., <span className="font-mono text-slate-400">scraping_browser1</span> or <span className="font-mono text-slate-400">unblocker</span>)</li>
+                  <li>Check customer ID format: <span className="font-mono text-slate-400">brd-customer-hl_xxxxx</span></li>
+                  <li>Try different zone name if 403 persists: use <span className="font-mono text-slate-400">unblocker</span></li>
+                  <li>Ensure password/token in endpoint is correct (check Bright Data dashboard)</li>
+                  <li>Port must be 9222 for Browser Automation API</li>
+                </ul>
+              </div>
+              
+              <button
+                onClick={saveConfig}
+                disabled={saving}
+                className="w-full py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 disabled:from-slate-600 disabled:to-slate-700 text-white font-medium rounded-lg transition-all flex items-center justify-center gap-2"
+              >
+                {saved ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Saved!
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Save Browser Automation Config'}
+                  </>
+                )}
+              </button>
+              <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 mt-4">
+                <p className="text-xs text-blue-300 font-medium mb-1">Flow</p>
+                <ul className="text-xs text-slate-400 space-y-1">
+                  <li>• Open Bright Data remote browser via WebSocket</li>
+                  <li>• Perform Google search</li>
+                  <li>• Click result → navigate to target URL</li>
+                  <li>• Stay on same browser (no switch to Luna)</li>
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ...existing credential fields for non-browser automation... */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Customer ID (Auto-extracted from Username)</label>
+                <input
+                  type="text"
+                  value={config.browser_customer_id}
+                  onChange={(e) => setConfig({ ...config, browser_customer_id: e.target.value })}
+                  placeholder="brd-customer-hl_a908b07a"
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-xs text-slate-500 mt-1">Customer identifier (e.g., brd-customer-hl_a908b07a). Auto-extracted from username if left empty.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Username (Zone)</label>
+                <input
+                  type="text"
+                  value={config.browser_username}
+                  onChange={(e) => setConfig({ ...config, browser_username: e.target.value })}
+                  placeholder="brd-customer-hl_a908b07a-zone-unblocker"
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-xs text-slate-500 mt-1">Format: brd-customer-CUSTOMER_ID-zone-ZONE_NAME</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Password (WebSocket Auth)</label>
+                <input
+                  type="password"
+                  value={config.browser_password}
+                  onChange={(e) => setConfig({ ...config, browser_password: e.target.value })}
+                  placeholder="Enter Browser Automation password"
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-xs text-slate-500 mt-1">Traditional password for WebSocket connections (optional)</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">API Token (HTTP API) 🔑</label>
+                <input
+                  type="password"
+                  value={config.browser_api_token}
+                  onChange={(e) => setConfig({ ...config, browser_api_token: e.target.value })}
+                  placeholder="cb3070be589695116882cfd8f6a37d4e3c0d19fe..."
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">64-character hex token for HTTP API (primary method - faster, no CAPTCHA)</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Browser Automation Zone</label>
+                <input
+                  type="text"
+                  value={config.browser_zone}
+                  onChange={(e) => setConfig({ ...config, browser_zone: e.target.value })}
+                  placeholder="unblocker"
+                  className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+                <p className="text-xs text-slate-500 mt-1">Zone name (default: unblocker)</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Endpoint</label>
+                  <input
+                    type="text"
+                    value={config.browser_endpoint}
+                    onChange={(e) => setConfig({ ...config, browser_endpoint: e.target.value })}
+                    placeholder="brd.superproxy.io"
+                    className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Port</label>
+                  <input
+                    type="text"
+                    value={config.browser_port}
+                    onChange={(e) => setConfig({ ...config, browser_port: e.target.value })}
+                    placeholder="9222"
+                    className="w-full px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={saveConfig}
+                disabled={saving}
+                className="w-full py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 disabled:from-slate-600 disabled:to-slate-700 text-white font-medium rounded-lg transition-all flex items-center justify-center gap-2 mt-4"
+              >
+                {saved ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Saved!
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Saving...' : 'Save Browser Automation Config'}
+                  </>
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
