@@ -56,23 +56,35 @@ export default function Dashboard() {
   }, []);
 
   async function loadCampaigns() {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('campaigns')
-      .select('*')
-      .order('created_at', { ascending: false });
+    try {
+      setLoading(true);
+      console.log('[DASHBOARD] Loading campaigns...');
+      
+      const { data, error } = await supabase
+        .from('campaigns')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setCampaigns(data);
-      // Update selected campaign if it exists
-      if (selectedCampaign) {
-        const updated = data.find(c => c.id === selectedCampaign.id);
-        if (updated) {
-          setSelectedCampaign(updated);
+      if (error) {
+        console.error('[DASHBOARD] Error loading campaigns:', error);
+        setCampaigns([]);
+      } else if (data) {
+        console.log('[DASHBOARD] Loaded campaigns:', data.length);
+        setCampaigns(data);
+        // Update selected campaign if it exists
+        if (selectedCampaign) {
+          const updated = data.find(c => c.id === selectedCampaign.id);
+          if (updated) {
+            setSelectedCampaign(updated);
+          }
         }
       }
+    } catch (err) {
+      console.error('[DASHBOARD] Exception loading campaigns:', err);
+      setCampaigns([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function handleCreateNew() {

@@ -299,6 +299,7 @@ async function executeHourlyBatch(
       geoLocation: geoLocation,
       waitUntil: 'networkidle2',
       extensionCrxUrl: extensionCrxUrl,
+      extensionId: extensionCrxUrl, // Pass as extensionId for automatic download
       userJourney: shouldBounce ? [] : (userJourney || []),
       sessionId: sessionId,
       supabaseUrl: Deno.env.get('SUPABASE_URL'),

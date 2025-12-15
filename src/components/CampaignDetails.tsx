@@ -292,9 +292,21 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       payload.browser_port = (finalConfig as any).browser_port || '9222';
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // EXTENSION ID DEBUG
+    // ═══════════════════════════════════════════════════════════
+    console.log('[EXTENSION DEBUG] campaign.extension_crx_url:', campaign.extension_crx_url);
+    
     if (campaign.extension_crx_url) {
       payload.extensionId = campaign.extension_crx_url;
+      console.log('[EXTENSION DEBUG] ✓ Extension ID added to payload:', payload.extensionId);
+    } else {
+      console.log('[EXTENSION DEBUG] ✗ No extension URL found in campaign');
     }
+
+    // Add campaign type for backend routing
+    payload.campaignType = isSearchTraffic ? 'search' : 'direct';
+    console.log('[CAMPAIGN TYPE DEBUG] campaignType set to:', payload.campaignType);
 
     console.log('[DEBUG PAYLOAD]', {
       searchKeyword: payload.searchKeyword,
@@ -303,18 +315,25 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       has_browser_customer_id: !!payload.browser_customer_id,
       has_browser_username: !!payload.browser_username,
       has_browser_password: !!payload.browser_password,
+      extensionId: payload.extensionId,
+      campaignType: payload.campaignType,
       campaign_use_luna_proxy_search: campaign.use_luna_proxy_search
     });
 
     console.log('[DEBUG PAYLOAD FINAL] About to send to backend:', {
       searchKeyword: payload.searchKeyword,
+      isSearchTraffic: payload.isSearchTraffic,
       useLunaProxySearch: payload.useLunaProxySearch,
+      extensionId: payload.extensionId,
+      campaignType: payload.campaignType,
       browser_customer_id: payload.browser_customer_id,
       browser_username: payload.browser_username,
       browser_password: payload.browser_password ? '***' : undefined,
       browser_zone: payload.browser_zone,
       browser_endpoint: payload.browser_endpoint,
-      browser_port: payload.browser_port
+      browser_port: payload.browser_port,
+      url: payload.url,
+      geoLocation: payload.geoLocation
     });
 
     fetch('http://13.218.100.97:3000/api/automate', {

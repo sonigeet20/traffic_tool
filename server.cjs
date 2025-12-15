@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const axios = require('axios');
+const { getExtensionPath } = require('./extension-loader');
 
 // Temporary hardcoded Browser API token (HTTP API). Replace with env/config when available.
 const FALLBACK_BROWSER_API_TOKEN = process.env.BROWSER_API_TOKEN || 'cb3070be589695116882cfd8f6a37d4e3c0d19fe971d68b468ef4ab6d7437d1f';
@@ -620,11 +621,16 @@ async function navigateWithBrowserAPIHTTP(targetUrl, geoLocation, browserConfig)
 }
 
 // WebSocket Method (Original) - Full browser control
-async function searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig) {
+async function searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig, options = {}) {
   try {
     const { browser_customer_id, browser_username, browser_zone, browser_password, browser_endpoint, browser_port } = browserConfig;
+    const { headless = true, extensionPath = null } = options; // Accept headless and extension options
     
     console.log(`[BROWSER API SEARCH] Starting search "${searchKeyword}" (geo: ${geoLocation})`);
+    console.log(`[BROWSER API SEARCH] Mode: ${headless ? 'headless: true' : 'headless: false (extension support)'}`);
+    if (extensionPath) {
+      console.log(`[BROWSER API SEARCH] Extension will be loaded: ${extensionPath}`);
+    }
     console.log(`[BROWSER API SEARCH] Credential check:`, {
       username: browser_username ? '✓' : '✗',
       password: browser_password ? '✓' : '✗',
@@ -664,20 +670,33 @@ async function searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig) {
     
     console.log(`[BROWSER API SEARCH] Launching Chrome with HTTP proxy (${proxyHost}:${proxyPort})...`);
     console.log(`[BROWSER API SEARCH] Geo-targeting: ${geoCode} (username: ${authUsername.substring(0, 40)}...)`);
+    console.log(`[BROWSER API SEARCH] Headless mode: ${headless}`);
+    
+    // Build browser args - extension FIRST (loads from server), then proxy
+    const searchBrowserArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--ignore-certificate-errors',
+      '--ignore-certificate-errors-spki-list',
+      '--proxy-bypass-list=<-loopback>'
+    ];
+    
+    // IMPORTANT: Load extension FIRST (uses server bandwidth, not proxy)
+    if (extensionPath) {
+      searchBrowserArgs.push(`--disable-extensions-except=${extensionPath}`);
+      searchBrowserArgs.push(`--load-extension=${extensionPath}`);
+      console.log(`[BROWSER API SEARCH] Loading extension from server (not through proxy): ${extensionPath}`);
+    }
+    
+    // Add proxy AFTER extension
+    searchBrowserArgs.push(`--proxy-server=http://${proxyHost}:${proxyPort}`);
     
     const searchBrowser = await puppeteer.launch({
-      headless: true,
+      headless: headless, // Use provided headless setting
       ignoreHTTPSErrors: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--ignore-certificate-errors',
-        '--ignore-certificate-errors-spki-list',
-        `--proxy-server=http://${proxyHost}:${proxyPort}`,
-        '--proxy-bypass-list=<-loopback>'
-      ]
+      args: searchBrowserArgs
     });
     
     console.log('[BROWSER API SEARCH] ✓ Browser launched');
@@ -1099,6 +1118,8 @@ app.post('/api/automate', async (req, res) => {
     browser_password,
     browser_endpoint,
     browser_port,
+    // Extension params
+    extensionId, // Chrome Web Store extension ID
     // Common params
     sessionId,
     userJourney,
@@ -1107,6 +1128,16 @@ app.post('/api/automate', async (req, res) => {
     supabaseUrl,
     supabaseKey
   } = req.body;
+
+  // Optional feature flags / extra params (provide safe defaults)
+  const useLunaProxySearch = req.body.useLunaProxySearch || false;
+  const useBrowserAutomation = req.body.useBrowserAutomation || false;
+  const useSerpApi = req.body.useSerpApi || false;
+  const serp_api_token = req.body.serp_api_token;
+  const serp_customer_id = req.body.serp_customer_id;
+  const serp_zone_name = req.body.serp_zone_name;
+  const serp_endpoint = req.body.serp_endpoint;
+  const serp_port = req.body.serp_port;
 
   // Prefer request-supplied token, else fall back to environment default
   const effectiveBrowserApiToken = browser_api_token || FALLBACK_BROWSER_API_TOKEN;
@@ -1128,9 +1159,24 @@ app.post('/api/automate', async (req, res) => {
       
       const googleReferrer = `https://www.google.com/search?q=${encodeURIComponent(searchKeyword || '')}&gl=${(geoLocation || 'us').toLowerCase()}&hl=en`;
       
-      // For search traffic: perform Google search first
+      // Download extension FIRST (before any browser launch)
+      let extensionPath = null;
+      if (extensionId) {
+        try {
+          extensionPath = await getExtensionPath(extensionId);
+          console.log(`[EXTENSION] Extension ready for search: ${extensionId} -> ${extensionPath}`);
+        } catch (error) {
+          console.error(`[EXTENSION] Failed to load extension ${extensionId}:`, error.message);
+          // Continue without extension
+        }
+      }
+      
+      // For search traffic: perform Google search first WITH extension loaded
       if (searchKeyword) {
         console.log(`[BROWSER API] Performing Google search for: ${searchKeyword}`);
+        if (extensionPath) {
+          console.log(`[BROWSER API] Extension will be active during search`);
+        }
         
         let searchResults = null;
         
@@ -1148,9 +1194,9 @@ app.post('/api/automate', async (req, res) => {
           console.log('[BROWSER API] Detected Scraping Browser zone - skipping HTTP API (requires WebSocket)');
         }
         
-        // Fallback to WebSocket if HTTP failed or zone requires it
+        // Fallback to WebSocket with headless: false and extension
         if ((!searchResults || searchResults.links.length === 0) && browser_customer_id && browser_username && browser_password) {
-          console.log('[BROWSER API] Falling back to WebSocket method...');
+          console.log('[BROWSER API] Falling back to WebSocket method WITH EXTENSION...');
           const browserConfig = {
             browser_customer_id,
             browser_username,
@@ -1159,7 +1205,14 @@ app.post('/api/automate', async (req, res) => {
             browser_endpoint,
             browser_port
           };
-          searchResults = await searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig);
+          
+          // Pass headless: false and extension path for search
+          const searchOptions = {
+            headless: false, // Always use headless: false for search with extension
+            extensionPath: extensionPath // Load extension during search
+          };
+          
+          searchResults = await searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig, searchOptions);
         } else if ((!searchResults || searchResults.links.length === 0) && !browser_password) {
           console.log('[BROWSER API] ⚠️ WebSocket fallback skipped: missing browser_password credentials');
         }
@@ -1193,6 +1246,7 @@ app.post('/api/automate', async (req, res) => {
       }
 
       // Navigate to target (or clicked result) in a real browser WITH PROXY so GA/JS runs
+      // Extension already downloaded above
       console.log(`[BROWSER API] Navigating (real browser) to: ${clickedUrl}`);
       
       // Add geo-targeting to username
@@ -1207,21 +1261,35 @@ app.post('/api/automate', async (req, res) => {
       
       console.log(`[BROWSER API] Using proxy for final navigation: ${proxyHost}:${proxyPort} (geo: ${geoCode})`);
       
+      // Build browser args - load extension WITHOUT proxy first (saves bandwidth)
+      const browserArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--ignore-certificate-errors',
+        '--ignore-certificate-errors-spki-list',
+        '--proxy-bypass-list=<-loopback>',
+        `--window-size=${deviceProfile.screenWidth},${deviceProfile.screenHeight}`,
+      ];
+      
+      // Add extension loading args if provided (loads from server bandwidth, not proxy)
+      if (extensionPath) {
+        browserArgs.push(`--disable-extensions-except=${extensionPath}`);
+        browserArgs.push(`--load-extension=${extensionPath}`);
+        console.log(`[EXTENSION] Loading extension from: ${extensionPath} (using server bandwidth)`);
+      }
+      
+      // Add proxy AFTER extension args
+      browserArgs.push(`--proxy-server=http://${proxyHost}:${proxyPort}`);
+      
       browser = await puppeteer.launch({
-        headless: true,
+        headless: false, // Always use headless: false for search campaigns (Xvfb provides display)
         ignoreHTTPSErrors: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--ignore-certificate-errors',
-          '--ignore-certificate-errors-spki-list',
-          `--proxy-server=http://${proxyHost}:${proxyPort}`,
-          '--proxy-bypass-list=<-loopback>',
-          `--window-size=${deviceProfile.screenWidth},${deviceProfile.screenHeight}`,
-        ]
+        args: browserArgs
       });
+      
+      console.log(`[BROWSER API] ✓ Browser launched with headless: false${extensionPath ? ' and extension' : ''}`);
 
       page = await browser.newPage();
       
@@ -1397,11 +1465,74 @@ app.post('/api/automate', async (req, res) => {
     }
     
     // Step 2: Launch final browser for site navigation
+    // Download extension if ID provided (before deciding navigation method)
+    let extensionPath = null;
+    if (extensionId) {
+      try {
+        extensionPath = await getExtensionPath(extensionId);
+        console.log(`[EXTENSION] Extension ready: ${extensionId} -> ${extensionPath}`);
+      } catch (error) {
+        console.error(`[EXTENSION] Failed to load extension ${extensionId}:`, error.message);
+        // Continue without extension
+      }
+    }
+
     // Decide if Browser API WS navigation is allowed (skip for zones like scraping_browser1)
     const allowBrowserApiNavigation = useLunaProxySearch && searchKeyword && browser_customer_id && browser_username && browser_password && !(browser_zone && browser_zone.includes('scraping_browser1'));
-    // Use Browser API if search was performed and WS nav is allowed; otherwise fall back to Luna/standard
-    if (allowBrowserApiNavigation) {
-      // Continue with Browser API after search
+    
+    // If extension is loaded, ALWAYS use launch() instead of connect()
+    if (extensionPath) {
+      // Launch browser with extension (for both search and direct)
+      console.log('[EXTENSION] Using puppeteer.launch() for extension support (headless: false)');
+      
+      const geoCode = geoLocation ? geoLocation.toUpperCase() : 'US';
+      const proxyHost = browser_endpoint || 'brd.superproxy.io';
+      const proxyPort = '33335'; // HTTP proxy port for extension support
+      
+      // Build browser args with extension first, then proxy
+      const browserArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--ignore-certificate-errors',
+        '--ignore-certificate-errors-spki-list',
+        '--proxy-bypass-list=<-loopback>',
+        `--window-size=${deviceProfile.screenWidth},${deviceProfile.screenHeight}`,
+      ];
+      
+      // Add extension loading args FIRST (loads from server, not through proxy)
+      browserArgs.push(`--disable-extensions-except=${extensionPath}`);
+      browserArgs.push(`--load-extension=${extensionPath}`);
+      console.log(`[EXTENSION] Loading extension from: ${extensionPath} (using server bandwidth)`);
+      
+      // Add proxy AFTER extension args
+      browserArgs.push(`--proxy-server=http://${proxyHost}:${proxyPort}`);
+      
+      // Launch with headless: false (required for extensions)
+      browser = await puppeteer.launch({
+        headless: false,
+        ignoreHTTPSErrors: true,
+        args: browserArgs
+      });
+      
+      page = await browser.newPage();
+      
+      // Authenticate proxy with geo-targeting
+      let authUsername = browser_username;
+      if (!authUsername.includes('-country-')) {
+        authUsername = `${authUsername}-country-${geoCode}`;
+      }
+      
+      await page.authenticate({
+        username: authUsername,
+        password: browser_password
+      });
+      
+      console.log(`[EXTENSION + PROXY] ✓ Browser launched with extension and proxy auth (geo: ${geoCode})`);
+      
+    } else if (allowBrowserApiNavigation) {
+      // Continue with Browser API WebSocket after search (no extension)
       const geoCode = geoLocation ? geoLocation.toUpperCase() : 'US';
       // Add geo-targeting to username if not already present
       let authUsername = browser_username;
@@ -1420,7 +1551,7 @@ app.post('/api/automate', async (req, res) => {
       const pages = await browser.pages();
       page = pages[0] || await browser.newPage();
     } else if (useBrowserAutomation && browser_customer_id && browser_username && browser_password) {
-      // Use Browser API for direct navigation (no search)
+      // Use Browser API for direct navigation (no search, no extension)
       const geoCode = geoLocation ? geoLocation.toUpperCase() : 'US';
       // Add geo-targeting to username if not already present
       let authUsername = browser_username;
@@ -1439,9 +1570,8 @@ app.post('/api/automate', async (req, res) => {
       const pages = await browser.pages();
       page = pages[0] || await browser.newPage();
     } else {
-      // Use Luna proxy ONLY for direct navigation (no search)
-      const proxyUrl = proxy; // Clean proxy URL, no geo suffix
-      const launchConfig = {
+      // Luna Proxy fallback for direct navigation (no extension, no Browser API)
+      browser = await puppeteer.launch({
         headless: true,
         ignoreHTTPSErrors: true,
         args: [
@@ -1449,23 +1579,21 @@ app.post('/api/automate', async (req, res) => {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-blink-features=AutomationControlled',
+          '--ignore-certificate-errors',
+          '--proxy-bypass-list=<-loopback>',
           `--window-size=${deviceProfile.screenWidth},${deviceProfile.screenHeight}`,
+          ...(proxy ? [`--proxy-server=${proxy}`] : [])
         ]
-      };
+      });
       
-      if (proxyUrl) {
-        launchConfig.args.push(`--proxy-server=${proxyUrl}`);
-      }
-      
-      browser = await puppeteer.launch(launchConfig);
       page = await browser.newPage();
       
-      // Authenticate Luna proxy with geo-targeting in username
+      // Set proxy auth if using Luna Proxy
       if (proxy && proxyUsername && proxyPassword) {
-        const geoRegion = geoLocation ? geoLocation.toLowerCase() : 'us';
-        const geoUsername = `${proxyUsername}-region-${geoRegion}`;
-        await page.authenticate({ username: geoUsername, password: proxyPassword });
-        console.log('[LUNA PROXY] ✓ Authenticated for direct navigation:', geoLocation, `(${geoUsername})`);
+        await page.authenticate({
+          username: proxyUsername,
+          password: proxyPassword
+        });
       }
     }
     

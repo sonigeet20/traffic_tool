@@ -38,29 +38,34 @@ function App() {
 
   async function checkAuth() {
     try {
+      console.log('[APP] Checking authentication...');
       const { data: { session }, error } = await supabase.auth.getSession();
       if (error) {
-        console.error('Auth check error:', error);
+        console.error('[APP] Auth check error:', error);
         setIsAuthenticated(false);
         return;
       }
+      console.log('[APP] Auth status:', !!session ? 'authenticated' : 'not authenticated');
       setIsAuthenticated(!!session);
 
       supabase.auth.onAuthStateChange((_event, session) => {
+        console.log('[APP] Auth state changed:', _event, !!session);
         setIsAuthenticated(!!session);
       });
     } catch (err) {
-      console.error('Auth check failed:', err);
+      console.error('[APP] Auth check failed:', err);
       setIsAuthenticated(false);
     }
   }
 
   async function checkSetup() {
     try {
+      console.log('[APP] Checking database setup...');
       const setup = await isDatabaseSetup();
+      console.log('[APP] Database setup status:', setup);
       setIsSetup(setup);
     } catch (err) {
-      console.error('Setup check failed:', err);
+      console.error('[APP] Setup check failed:', err);
       setIsSetup(true); // Assume setup is complete on error
     }
   }

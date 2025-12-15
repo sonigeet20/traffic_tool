@@ -830,24 +830,26 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
               )}
 
               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
-                <h4 className="text-sm font-semibold text-white mb-3">Browser Extension (Optional)</h4>
+                <h4 className="text-sm font-semibold text-white mb-3">🧩 Browser Extension (Optional)</h4>
                 <p className="text-slate-400 text-sm mb-4">
-                  Enter a Chrome Web Store extension ID to test how extensions affect your website
+                  Load Chrome extensions automatically. Server downloads and caches extensions from Chrome Web Store.
                 </p>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
-                    Extension ID
+                    Chrome Extension ID
                   </label>
                   <input
                     type="text"
                     value={extensionId}
                     onChange={(e) => setExtensionId(e.target.value)}
-                    placeholder="e.g., cjpalhdlnbpafiamejdnhcphjbkeiagm"
-                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                    placeholder="e.g., cjpalhdlnbpafiamejdnhcphjbkeiagm (SimilarWeb)"
+                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors font-mono text-sm"
                   />
                   <p className="text-slate-500 text-xs mt-2">
-                    Find extension IDs at chrome://extensions (enable Developer Mode)
+                    💡 Find extension IDs at <span className="text-cyan-400">chrome://extensions</span> (enable Developer Mode)<br/>
+                    📦 Extensions are downloaded once and cached on server<br/>
+                    ✅ Requires: Xvfb enabled (headless: false)
                   </p>
                 </div>
               </div>
