@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const axios = require('axios');
-const { getExtensionPath } = require('./extension-loader');
+const { getExtensionPath } = require('./extension-loader.js');
 
 // Temporary hardcoded Browser API token (HTTP API). Replace with env/config when available.
 const FALLBACK_BROWSER_API_TOKEN = process.env.BROWSER_API_TOKEN || 'cb3070be589695116882cfd8f6a37d4e3c0d19fe971d68b468ef4ab6d7437d1f';
@@ -663,13 +663,17 @@ async function searchWithBrowserAPI(searchKeyword, geoLocation, browserConfig, o
     const geoCode = geoLocation ? geoLocation.toUpperCase() : 'US';
     let authUsername = browser_username;
     
-    // Add country targeting if not already present
-    if (!authUsername.includes('-country-')) {
+    // Bright Data uses -country-, Luna uses -region-
+    const isLunaProxy = browser_username.includes('admin_') || browser_username.includes('lunaproxy');
+    
+    if (isLunaProxy && !authUsername.includes('-region-')) {
+      authUsername = `${authUsername}-region-${geoCode.toLowerCase()}`;
+    } else if (!isLunaProxy && !authUsername.includes('-country-')) {
       authUsername = `${authUsername}-country-${geoCode}`;
     }
     
     console.log(`[BROWSER API SEARCH] Launching Chrome with HTTP proxy (${proxyHost}:${proxyPort})...`);
-    console.log(`[BROWSER API SEARCH] Geo-targeting: ${geoCode} (username: ${authUsername.substring(0, 40)}...)`);
+    console.log(`[BROWSER API SEARCH] Geo-targeting: ${geoCode} (username: ${authUsername.substring(0, 40)}...) [${isLunaProxy ? 'Luna' : 'Bright Data'}]`);
     console.log(`[BROWSER API SEARCH] Headless mode: ${headless}`);
     
     // Build browser args - extension FIRST (loads from server), then proxy
@@ -1074,6 +1078,165 @@ async function searchWithBrightDataSERP(searchKeyword, geoLocation, serpConfig) 
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// SESSION LOGGER - Capture all logs for frontend display
+// ════════════════════════════════════════════════════════════════════════
+
+class SessionLogger {
+  constructor(sessionId) {
+    this.sessionId = sessionId;
+    this.logs = [];
+    this.startTime = new Date();
+  }
+
+  log(stage, message, type = 'info') {
+    const timestamp = new Date().toISOString();
+    const logEntry = {
+      timestamp,
+      stage,
+      message,
+      type // 'info', 'success', 'warning', 'error'
+    };
+    this.logs.push(logEntry);
+    console.log(`[${stage}] ${message}`);
+  }
+
+  success(stage, message) {
+    this.log(stage, `✓ ${message}`, 'success');
+  }
+
+  warning(stage, message) {
+    this.log(stage, `⚠️ ${message}`, 'warning');
+  }
+
+  error(stage, message) {
+    this.log(stage, `✗ ${message}`, 'error');
+  }
+
+  getLogs() {
+    return {
+      sessionId: this.sessionId,
+      startTime: this.startTime,
+      endTime: new Date(),
+      totalLogs: this.logs.length,
+      logs: this.logs
+    };
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// LUNA HEADFUL DIRECT - Direct traffic with extension support
+// ════════════════════════════════════════════════════════════════════════
+
+async function navigateWithLunaHeadful(targetUrl, geoLocation, lunaConfig, deviceProfile, extensionPath = null) {
+  try {
+    const { proxy, proxyUsername, proxyPassword } = lunaConfig;
+    
+    console.log(`[LUNA HEADFUL DIRECT] Starting direct navigation to: ${targetUrl}`);
+    console.log(`[LUNA HEADFUL DIRECT] Geo: ${geoLocation}, Proxy: ${proxy ? 'configured' : 'none'}`);
+    console.log(`[LUNA HEADFUL DIRECT] Extension: ${extensionPath ? 'yes' : 'no'}`);
+    
+    // Parse proxy host/port from proxy string (format: http://host:port)
+    let proxyHost = 'na.lunaproxy.com';
+    let proxyPort = '12233';
+    if (proxy) {
+      const match = proxy.match(/https?:\/\/([^:]+):(\d+)/);
+      if (match) {
+        proxyHost = match[1];
+        proxyPort = match[2];
+      }
+    }
+    
+    // Build browser args - extension FIRST, then proxy
+    const browserArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+      '--ignore-certificate-errors',
+      '--ignore-certificate-errors-spki-list',
+      '--proxy-bypass-list=<-loopback>',
+      `--window-size=${deviceProfile.screenWidth},${deviceProfile.screenHeight}`
+    ];
+    
+    // Add extension FIRST if provided
+    if (extensionPath) {
+      browserArgs.push(`--disable-extensions-except=${extensionPath}`);
+      browserArgs.push(`--load-extension=${extensionPath}`);
+      console.log(`[LUNA HEADFUL DIRECT] Loading extension: ${extensionPath}`);
+    }
+    
+    // Add proxy AFTER extension
+    if (proxy) {
+      browserArgs.push(`--proxy-server=http://${proxyHost}:${proxyPort}`);
+    }
+    
+    // Launch with headless: false
+    const lunaDirectBrowser = await puppeteer.launch({
+      headless: false,
+      ignoreHTTPSErrors: true,
+      args: browserArgs
+    });
+    
+    console.log('[LUNA HEADFUL DIRECT] ✓ Browser launched (headless: false)');
+    
+    const lunaDirectPage = await lunaDirectBrowser.newPage();
+    
+    // Set proxy auth if provided
+    if (proxyUsername && proxyPassword) {
+      const authUsername = proxyUsername.includes('-region-') 
+        ? proxyUsername 
+        : `${proxyUsername}-region-${geoLocation.toLowerCase()}`;
+      
+      await lunaDirectPage.authenticate({
+        username: authUsername,
+        password: proxyPassword
+      });
+      console.log(`[LUNA HEADFUL DIRECT] ✓ Proxy authentication configured (${authUsername})`);
+    }
+    
+    // Apply device fingerprinting
+    await injectRealDeviceFingerprint(lunaDirectPage, deviceProfile);
+    await setRealisticHeaders(lunaDirectPage, deviceProfile);
+    
+    // Navigate to target URL
+    console.log(`[LUNA HEADFUL DIRECT] Navigating to: ${targetUrl}`);
+    
+    try {
+      await lunaDirectPage.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+      console.log(`[LUNA HEADFUL DIRECT] ✓ Page loaded successfully`);
+    } catch (err) {
+      console.log(`[LUNA HEADFUL DIRECT] ⚠️ Navigation error: ${err.message}, trying networkidle0...`);
+      try {
+        await lunaDirectPage.goto(targetUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+        console.log(`[LUNA HEADFUL DIRECT] ✓ Page loaded (networkidle0 fallback)`);
+      } catch (retryErr) {
+        console.log(`[LUNA HEADFUL DIRECT] ⚠️ Final navigation attempt failed: ${retryErr.message}`);
+      }
+    }
+    
+    // Simulate human behavior
+    const scrolls = Math.floor(Math.random() * 3) + 1;
+    for (let i = 0; i < scrolls; i++) {
+      try {
+        await lunaDirectPage.evaluate(() => window.scrollBy(0, window.innerHeight / 2));
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+      } catch (err) {
+        console.log('[LUNA HEADFUL DIRECT] Note: scroll failed');
+        break;
+      }
+    }
+    
+    console.log(`[LUNA HEADFUL DIRECT] ✓ Navigation completed successfully`);
+    
+    return { browser: lunaDirectBrowser, page: lunaDirectPage, success: true };
+    
+  } catch (error) {
+    console.error(`[LUNA HEADFUL DIRECT] Error: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // MAIN AUTOMATION ENDPOINT
 // ════════════════════════════════════════════════════════════════════════
 
@@ -1133,6 +1296,7 @@ app.post('/api/automate', async (req, res) => {
   const useLunaProxySearch = req.body.useLunaProxySearch || false;
   const useBrowserAutomation = req.body.useBrowserAutomation || false;
   const useSerpApi = req.body.useSerpApi || false;
+  const useLunaHeadfulDirect = req.body.useLunaHeadfulDirect || false;
   const serp_api_token = req.body.serp_api_token;
   const serp_customer_id = req.body.serp_customer_id;
   const serp_zone_name = req.body.serp_zone_name;
@@ -1142,12 +1306,17 @@ app.post('/api/automate', async (req, res) => {
   // Prefer request-supplied token, else fall back to environment default
   const effectiveBrowserApiToken = browser_api_token || FALLBACK_BROWSER_API_TOKEN;
 
+  // Initialize session logger
+  const sessionLogger = new SessionLogger(sessionId);
+
   let browser;
   let page;
   let clickedUrl = url;
 
   try {
     const deviceProfile = generateDeviceProfile(geoLocation || 'US');
+    sessionLogger.log('SESSION', `Campaign Type: ${campaignType}, Target: ${url}`, 'info');
+    sessionLogger.log('DEVICE', `Using: ${deviceProfile.name}`, 'info');
     console.log(`[SESSION] Type: ${(campaignType || 'direct').toUpperCase()}, Target: ${url}`);
     console.log(`[DEVICE] Using: ${deviceProfile.name}`);
     
@@ -1252,14 +1421,20 @@ app.post('/api/automate', async (req, res) => {
       // Add geo-targeting to username
       const geoCode = geoLocation ? geoLocation.toUpperCase() : 'US';
       let authUsername = browser_username;
-      if (!authUsername.includes('-country-')) {
+      
+      // Bright Data uses -country-, Luna uses -region-
+      const isLunaProxy = browser_username.includes('admin_') || browser_username.includes('lunaproxy');
+      
+      if (isLunaProxy && !authUsername.includes('-region-')) {
+        authUsername = `${authUsername}-region-${geoCode.toLowerCase()}`;
+      } else if (!isLunaProxy && !authUsername.includes('-country-')) {
         authUsername = `${authUsername}-country-${geoCode}`;
       }
       
       const proxyHost = browser_endpoint || 'brd.superproxy.io';
       const proxyPort = '33335';
       
-      console.log(`[BROWSER API] Using proxy for final navigation: ${proxyHost}:${proxyPort} (geo: ${geoCode})`);
+      console.log(`[BROWSER API] Using proxy for final navigation: ${proxyHost}:${proxyPort} (geo: ${geoCode}) [${isLunaProxy ? 'Luna' : 'Bright Data'}]`);
       
       // Build browser args - load extension WITHOUT proxy first (saves bandwidth)
       const browserArgs = [
@@ -1320,7 +1495,92 @@ app.post('/api/automate', async (req, res) => {
       await new Promise(r => setTimeout(r, duration));
       
       console.log('[BROWSER API] ✓ Session completed successfully (real browser)');
-      return res.json({ success: true, sessionId, clickedUrl, method: 'browser_api_browser' });
+      const logs = sessionLogger.getLogs();
+      return res.json({ success: true, sessionId, clickedUrl, method: 'browser_api_browser', logs });
+    }
+    
+    // ═══════════════════════════════════════════════════════════
+    // DIRECT CAMPAIGN - Luna Headful (NEW OPTION 2)
+    // ═══════════════════════════════════════════════════════════
+    if (campaignType === 'direct' && useLunaHeadfulDirect && proxy) {
+      sessionLogger.log('FLOW', 'Luna Headful Direct mode - Direct navigation with extension', 'info');
+      
+      // Download extension if provided
+      let extensionPath = null;
+      if (extensionId) {
+        try {
+          extensionPath = await getExtensionPath(extensionId);
+          sessionLogger.success('EXTENSION', `Extension ready: ${extensionId}`);
+        } catch (error) {
+          sessionLogger.error('EXTENSION', `Failed to load extension ${extensionId}: ${error.message}`);
+        }
+      }
+      
+      const lunaConfig = {
+        proxy,
+        proxyUsername,
+        proxyPassword
+      };
+      
+      sessionLogger.log('LUNA', 'Initiating Luna Headful Direct navigation', 'info');
+      const result = await navigateWithLunaHeadful(url, geoLocation || 'US', lunaConfig, deviceProfile, extensionPath);
+      
+      if (result.success && result.page) {
+        page = result.page;
+        browser = result.browser;
+        clickedUrl = url;
+        
+        sessionLogger.success('LUNA', 'Browser and page acquired for session continuation');
+        
+        // Execute user journey or random behavior
+        if (userJourney && userJourney.length > 0) {
+          sessionLogger.log('JOURNEY', 'Executing user actions', 'info');
+          for (const action of userJourney) {
+            const { type, selector, url: actionUrl, text, delay } = action;
+            try {
+              if (type === 'click' && selector) {
+                await page.click(selector);
+                sessionLogger.log('JOURNEY', `Clicked: ${selector}`, 'success');
+              } else if (type === 'type' && selector) {
+                await page.type(selector, text, { delay: 100 });
+                sessionLogger.log('JOURNEY', `Typed in: ${selector}`, 'success');
+              } else if (type === 'navigate' && actionUrl) {
+                await page.goto(actionUrl, { waitUntil: 'networkidle2' });
+                sessionLogger.log('JOURNEY', `Navigated to: ${actionUrl}`, 'success');
+              }
+              
+              if (delay) {
+                await new Promise(r => setTimeout(r, delay));
+              }
+            } catch (err) {
+              sessionLogger.warning('JOURNEY', err.message);
+            }
+          }
+          sessionLogger.success('JOURNEY', 'Completed');
+        } else {
+          // Random browsing behavior
+          const scrolls = Math.floor(Math.random() * 3) + 1;
+          for (let i = 0; i < scrolls; i++) {
+            await page.evaluate(() => window.scrollBy(0, window.innerHeight / 2));
+            await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+          }
+          sessionLogger.log('BEHAVIOR', 'Random browsing simulated', 'success');
+        }
+        
+        // Session duration
+        const minDuration = (sessionDurationMin || 30) * 1000;
+        const maxDuration = (sessionDurationMax || 120) * 1000;
+        const duration = minDuration + Math.random() * (maxDuration - minDuration);
+        await new Promise(r => setTimeout(r, duration));
+        
+        sessionLogger.success('SESSION', 'Completed successfully');
+        const logs = sessionLogger.getLogs();
+        return res.json({ success: true, sessionId, clickedUrl, method: 'luna_headful_direct', logs });
+      } else {
+        sessionLogger.error('LUNA', `Navigation failed: ${result.error}`);
+        const logs = sessionLogger.getLogs();
+        return res.status(500).json({ success: false, error: `Luna Headful Direct failed: ${result.error}`, logs });
+      }
     }
     
     // ORIGINAL FLOW: For non-Browser API campaigns
@@ -1328,6 +1588,7 @@ app.post('/api/automate', async (req, res) => {
     clickedUrl = url;
     
     // DEBUG: Check all conditions for Browser API search
+    sessionLogger.log('DEBUG', 'Checking conditions for Browser API search', 'info');
     console.log('[DEBUG CONDITIONS]');
     console.log(`  useLunaProxySearch: ${useLunaProxySearch}`);
     console.log(`  searchKeyword: ${searchKeyword}`);
@@ -1520,7 +1781,12 @@ app.post('/api/automate', async (req, res) => {
       
       // Authenticate proxy with geo-targeting
       let authUsername = browser_username;
-      if (!authUsername.includes('-country-')) {
+      // Bright Data uses -country-, Luna uses -region-
+      const isLunaProxy = browser_username.includes('admin_') || browser_username.includes('lunaproxy');
+      
+      if (isLunaProxy && !authUsername.includes('-region-')) {
+        authUsername = `${authUsername}-region-${geoCode.toLowerCase()}`;
+      } else if (!isLunaProxy && !authUsername.includes('-country-')) {
         authUsername = `${authUsername}-country-${geoCode}`;
       }
       
@@ -1529,7 +1795,8 @@ app.post('/api/automate', async (req, res) => {
         password: browser_password
       });
       
-      console.log(`[EXTENSION + PROXY] ✓ Browser launched with extension and proxy auth (geo: ${geoCode})`);
+      console.log(`[EXTENSION + PROXY] ✓ Browser launched with extension and proxy auth (${isLunaProxy ? 'Luna' : 'Bright Data'}, geo: ${geoCode})`);
+      console.log(`[EXTENSION + PROXY] Auth username: ${authUsername.substring(0, 40)}...`);
       
     } else if (allowBrowserApiNavigation) {
       // Continue with Browser API WebSocket after search (no extension)
@@ -1590,10 +1857,16 @@ app.post('/api/automate', async (req, res) => {
       
       // Set proxy auth if using Luna Proxy
       if (proxy && proxyUsername && proxyPassword) {
+        // Luna proxy format: user-admin_X5otK-region-{countrycode}
+        const authUsername = proxyUsername.includes('-region-') 
+          ? proxyUsername 
+          : `${proxyUsername}-region-${geoLocation ? geoLocation.toLowerCase() : 'us'}`;
+        
         await page.authenticate({
-          username: proxyUsername,
+          username: authUsername,
           password: proxyPassword
         });
+        console.log(`[LUNA PROXY] ✓ Geo-targeting configured: ${authUsername}`);
       }
     }
     
@@ -1672,17 +1945,21 @@ app.post('/api/automate', async (req, res) => {
     await new Promise(r => setTimeout(r, duration));
     
     console.log('[SESSION] ✓ Completed successfully');
-    res.json({ success: true, sessionId, clickedUrl });
+    const logs = sessionLogger.getLogs();
+    res.json({ success: true, sessionId, clickedUrl, logs });
     
   } catch (error) {
+    sessionLogger.error('SESSION', error.message);
+    const logs = sessionLogger.getLogs();
     console.error('[ERROR]', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: error.message, logs });
   } finally {
     if (browser) {
       try {
         await browser.close();
+        sessionLogger.success('CLEANUP', 'Browser closed successfully');
       } catch (err) {
-        console.log('[CLEANUP] Browser close error:', err.message);
+        sessionLogger.warning('CLEANUP', `Browser close error: ${err.message}`);
       }
     }
   }

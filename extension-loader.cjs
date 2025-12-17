@@ -43,11 +43,21 @@ async function getExtensionPath(extensionId) {
   // Unpack CRX using unzip (CRX is essentially a ZIP with header)
   try {
     // Skip CRX header (first 16 bytes for CRX3) and unzip
-    execSync(`unzip -o "${crxPath}" -d "${extensionDir}" 2>/dev/null || true`);
+    execSync(`unzip -o "${crxPath}" -d "${extensionDir}"`);
     console.log(`[EXTENSION] Unpacked extension to: ${extensionDir}`);
     
-    // Clean up CRX file
-    fs.unlinkSync(crxPath);
+    // Clean up CRX file - with proper error handling
+    try {
+      if (fs.existsSync(crxPath)) {
+        fs.unlinkSync(crxPath);
+        console.log(`[EXTENSION] Cleaned up CRX file: ${crxPath}`);
+      } else {
+        console.log(`[EXTENSION] CRX file already removed`);
+      }
+    } catch (unlinkErr) {
+      console.log(`[EXTENSION] Warning: Could not delete CRX file: ${unlinkErr.message}`);
+      // Continue anyway - extension is successfully unpacked
+    }
     
     return extensionDir;
   } catch (error) {

@@ -46,6 +46,8 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
   const [useBrowserAutomation, setUseBrowserAutomation] = useState(false);
   const [useLunaProxySearch, setUseLunaProxySearch] = useState(false);
   const [campaignType, setCampaignType] = useState<'direct' | 'search'>('direct');
+  const [useLunaHeadfulDirect, setUseLunaHeadfulDirect] = useState(false);
+  const [searchMode, setSearchMode] = useState<'browser_api' | 'luna_headful_direct'>('browser_api');
   const [currentTab, setCurrentTab] = useState<'basic' | 'geo' | 'journey' | 'plugins'>('basic');
 
   useEffect(() => {
@@ -85,6 +87,15 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
       setUseBrowserAutomation(campaign.use_browser_automation || false);
       setUseLunaProxySearch(campaign.use_luna_proxy_search || false);
       setCampaignType(campaign.campaign_type || 'direct');
+      setUseLunaHeadfulDirect(campaign.use_luna_headful_direct || false);
+      
+      // Set searchMode based on campaign type
+      if (campaign.campaign_type === 'search') {
+        setSearchMode('browser_api');
+      } else if (campaign.use_luna_headful_direct) {
+        setSearchMode('luna_headful_direct');
+      }
+      
       loadJourneys(campaign.id);
       loadPlugins(campaign.id);
     }
@@ -150,6 +161,7 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
           use_browser_automation: useBrowserAutomation,
           use_luna_proxy_search: useLunaProxySearch,
           campaign_type: campaignType,
+          use_luna_headful_direct: useLunaHeadfulDirect,
           updated_at: new Date().toISOString(),
         };
         console.log('[SAVE DEBUG] Full update payload:', updateData);
@@ -196,6 +208,7 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
             use_browser_automation: useBrowserAutomation,
             use_luna_proxy_search: useLunaProxySearch,
             campaign_type: campaignType,
+            use_luna_headful_direct: useLunaHeadfulDirect,
           })
           .select()
           .single();
@@ -320,46 +333,75 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
 
               <div className="bg-gradient-to-r from-cyan-500/10 to-green-500/10 border-2 border-cyan-500/30 rounded-xl p-6">
                 <label className="block text-sm font-medium text-white mb-3">
-                  Campaign Type
+                  Traffic Source Mode
                 </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setCampaignType('search')}
-                    className={`p-4 rounded-lg border-2 transition-all ${
-                      campaignType === 'search'
-                        ? 'bg-cyan-500/20 border-cyan-500 text-white'
-                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="text-lg font-semibold mb-1">🔍 Search Campaign</div>
-                    <div className="text-xs opacity-80">Browser API for Google Search + Click</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCampaignType('direct')}
-                    className={`p-4 rounded-lg border-2 transition-all ${
-                      campaignType === 'direct'
-                        ? 'bg-green-500/20 border-green-500 text-white'
-                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="text-lg font-semibold mb-1">🎯 Direct Campaign</div>
-                    <div className="text-xs opacity-80">Luna Proxy for Direct Navigation</div>
-                  </button>
-                </div>
-                <div className="mt-4 p-3 bg-slate-900/50 rounded-lg">
-                  <div className="text-sm text-slate-300">
-                    {campaignType === 'search' ? (
-                      <>
-                        <span className="text-cyan-400 font-semibold">Search Campaign:</span> Uses Bright Data Browser API exclusively for Google search and target site navigation. No Luna proxy involved.
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-green-400 font-semibold">Direct Campaign:</span> Uses Luna residential proxy exclusively for direct navigation to target URL. No search involved.
-                      </>
-                    )}
-                  </div>
+                <p className="text-xs text-slate-400 mb-4">
+                  Choose how traffic will be generated for this campaign
+                </p>
+                
+                <div className="space-y-3">
+                  {/* Option 1: Browser API Search */}
+                  <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors"
+                         style={{ borderColor: searchMode === 'browser_api' ? '#06b6d4' : '#334155' }}>
+                    <input
+                      type="radio"
+                      name="searchMode"
+                      value="browser_api"
+                      checked={searchMode === 'browser_api'}
+                      onChange={(e) => {
+                        setSearchMode('browser_api');
+                        setCampaignType('search');
+                        setUseLunaHeadfulDirect(false);
+                      }}
+                      className="mt-1 mr-3"
+                    />
+                    <div className="flex-1">
+                      <div className="font-semibold text-white flex items-center gap-2">
+                        🚀 Option 1: Search via Bright Data Browser API
+                        <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 rounded border border-green-500/30">RECOMMENDED</span>
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1">
+                        Google search → click result → visit site. Uses Bright Data's unblocking infrastructure with auto-CAPTCHA solving.
+                      </p>
+                      <div className="text-xs text-slate-500 mt-2 space-y-1">
+                        <div>✓ Best for bypassing detection</div>
+                        <div>✓ Automatic IP rotation & geo-targeting</div>
+                        <div>✓ Extension support (loads with search)</div>
+                      </div>
+                    </div>
+                  </label>
+                  
+                  {/* Option 2: Luna Headful Direct */}
+                  <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer hover:bg-slate-800/50 transition-colors"
+                         style={{ borderColor: searchMode === 'luna_headful_direct' ? '#06b6d4' : '#334155' }}>
+                    <input
+                      type="radio"
+                      name="searchMode"
+                      value="luna_headful_direct"
+                      checked={searchMode === 'luna_headful_direct'}
+                      onChange={(e) => {
+                        setSearchMode('luna_headful_direct');
+                        setCampaignType('direct');
+                        setUseLunaHeadfulDirect(true);
+                      }}
+                      className="mt-1 mr-3"
+                    />
+                    <div className="flex-1">
+                      <div className="font-semibold text-white flex items-center gap-2">
+                        🎯 Option 2: Direct Traffic via Luna (Headful + Extension)
+                        <span className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 rounded border border-blue-500/30">NEW</span>
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1">
+                        Direct navigation to target URL. No search, just visit. Uses Luna residential proxy with headless:false + extension support.
+                      </p>
+                      <div className="text-xs text-slate-500 mt-2 space-y-1">
+                        <div>💰 Most cost-effective option</div>
+                        <div>⚡ Fastest execution</div>
+                        <div>✓ Extension support</div>
+                        <div>ℹ️ No Google search (direct URL only)</div>
+                      </div>
+                    </div>
+                  </label>
                 </div>
               </div>
 

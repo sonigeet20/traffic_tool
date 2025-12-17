@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
 import { ArrowLeft, Play, Pause, RefreshCw, Activity, Clock, CheckCircle, XCircle, TrendingUp } from 'lucide-react';
+import SessionLogs from './SessionLogs';
 
 type Campaign = Database['public']['Tables']['campaigns']['Row'];
 type BotSession = Database['public']['Tables']['bot_sessions']['Row'];
@@ -20,6 +21,8 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
   const [browserApiConfig, setBrowserApiConfig] = useState<any>(null);
+  const [sessionLogs, setSessionLogs] = useState<any[]>([]);
+  const [logsExpanded, setLogsExpanded] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -340,7 +343,15 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }).catch(() => {});
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (data.logs) {
+          setSessionLogs(prev => [...prev, ...data.logs.logs]);
+          setLogsExpanded(true); // Auto-expand on new logs
+        }
+      })
+      .catch(() => {});
   }
 
   async function handleExecute() {
@@ -575,6 +586,13 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
           </div>
         )}
       </div>
+
+      {/* Session Logs Window */}
+      <SessionLogs 
+        logs={sessionLogs} 
+        isLoading={executing}
+        isExpanded={logsExpanded}
+      />
     </div>
   );
 }

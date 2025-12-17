@@ -16,6 +16,8 @@
     "express": "^5.2.1",
     "lucide-react": "^0.344.0",
     "pm2": "^6.0.14",
+    "proxy-chain": "^2.7.0",
+    "puppeteer": "^24.33.0",
     "puppeteer-core": "^24.32.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
