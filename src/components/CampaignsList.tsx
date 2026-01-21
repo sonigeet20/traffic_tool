@@ -44,12 +44,6 @@ export default function CampaignsList({
     if (newStatus === 'active') {
       setStartingCampaign(campaign.id);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
-          alert('Please sign in again to start a campaign.');
-          setStartingCampaign(null);
-          return;
-        }
         let body: any = { campaignId: campaign.id };
         
         // Get the current user for config
@@ -82,7 +76,6 @@ export default function CampaignsList({
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`,
             },
             body: JSON.stringify(body),
           }
