@@ -390,10 +390,17 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
         await loadBrowserApiConfig();
       }
 
-      await (supabase
+      const { error: updateError } = await supabase
         .from('campaigns')
-        .update as any)({ status: 'active', started_at: new Date().toISOString() })
+        .update({ status: 'active', started_at: new Date().toISOString() })
         .eq('id', campaign.id);
+      
+      if (updateError) {
+        console.error('[CAMPAIGN] Failed to update status:', updateError);
+        throw new Error(`Failed to update campaign status: ${updateError.message}`);
+      }
+      
+      console.log('[CAMPAIGN] Status updated to active for campaign:', campaign.id);
 
       const sessionsPerHour = campaign.sessions_per_hour || 10;
       const intervalMs = (60 * 60 * 1000) / sessionsPerHour;
