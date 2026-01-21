@@ -7,6 +7,13 @@ const path = require('path');
 const https = require('https');
 const axios = require('axios');
 const { getExtensionPath } = require('./extension-loader.js');
+const {
+  analyzeSiteStructure,
+  shouldBounce,
+  intelligentNavigate,
+  createDebugBandwidthTracker,
+  initUltra10KBGuards
+} = require('./intelligent-traffic-module.js');
 
 // Temporary hardcoded Browser API token (HTTP API). Replace with env/config when available.
 const FALLBACK_BROWSER_API_TOKEN = process.env.BROWSER_API_TOKEN || 'cb3070be589695116882cfd8f6a37d4e3c0d19fe971d68b468ef4ab6d7437d1f';
@@ -216,67 +223,23 @@ function createBandwidthTracker(sessionLogger) {
   return { attachToPage, getTotalBytes, report };
 }
 
-// Ultra-lean resource guards: aggressive bandwidth reduction to <300KB/session
+// Ultra-lean resource guards: 300KB hard limit + click/nav support
 function initLeanResourceGuards(page, mainHost) {
+  const BANDWIDTH_LIMIT = 300 * 1024; // 300KB hard limit
+  let totalBytes = 0;
+  let limitReached = false;
+  let sameOriginScriptCount = 0;
+  const MAX_SAME_ORIGIN_SCRIPTS = 1; // Allow only 1 same-origin script for click handlers
+  
   const analyticsHosts = [
-    // Google Analytics & Tag Manager
-    'google-analytics.com',
-    'www.google-analytics.com',
-    'ssl.google-analytics.com',
-    'googletagmanager.com',
-    'www.googletagmanager.com',
-    'gtm-msr.appspot.com',
-    'analytics.google.com',
-    'www.googletagmanager.com/gtag/',
-    'google.com',
-    'www.google.com',
-    
-    // Microsoft Clarity
-    'clarity.ms',
-    'www.clarity.ms',
-    'static.clarity.ms',
-    'clr.ms',
-    'clrouter.clr.ms',
-    'config.clarity.ms',
-    
-    // Hotjar
-    'hotjar.com',
-    'static.hotjar.com',
-    'script.hotjar.com',
-    'hjcdn.com',
-    'hjus.com',
-    'hjcdn.hjus.com',
-    'ws.hotjar.com',
-    'vars.hotjar.com',
-    
-    // Segment
-    'cdn.segment.com',
-    'api.segment.io',
-    'segment.com',
-    
-    // Mixpanel
-    'mixpanel.com',
-    'cdn.mixpanel.com',
-    'api.mixpanel.com',
-    
-    // SimilarWeb
-    'similarweb.com',
-    'www.similarweb.com',
-    'cdn.similarweb.com',
-    'swzjjqqe.similarweb.com',
-    
-    // Google APIs (for extensions and page functionality)
-    'googleapis.com',
-    'google-analytics-bundle.js',
-    'recaptcha.net',
-    'gstatic.com',
-    
-    // Additional analytics
-    'amplitude.com',
-    'api.amplitude.com',
-    'fullstory.com',
-    'api.fullstory.com',
-    'amplitude-js.fullstory.com'
+    'google-analytics.com', 'www.google-analytics.com', 'ssl.google-analytics.com',
+    'googletagmanager.com', 'www.googletagmanager.com', 'gtm-msr.appspot.com',
+    'analytics.google.com', 'google.com', 'www.google.com',
+    'clarity.ms', 'www.clarity.ms', 'static.clarity.ms', 'clr.ms', 'clrouter.clr.ms',
+    'hotjar.com', 'static.hotjar.com', 'script.hotjar.com', 'hjcdn.com', 'hjus.com', 'ws.hotjar.com',
+    'cdn.segment.com', 'api.segment.io', 'mixpanel.com', 'cdn.mixpanel.com',
+    'similarweb.com', 'www.similarweb.com', 'cdn.similarweb.com',
+    'amplitude.com', 'api.amplitude.com', 'fullstory.com', 'gstatic.com'
   ];
 
   const isAnalytics = (url) => {
@@ -288,6 +251,25 @@ function initLeanResourceGuards(page, mainHost) {
     }
   };
 
+  // Track bandwidth on responses
+  page.on('response', (response) => {
+    if (limitReached) return;
+    try {
+      const headers = response.headers();
+      const len = headers['content-length'] || headers['Content-Length'];
+      if (len) {
+        const bytes = parseInt(len, 10);
+        if (!isNaN(bytes)) {
+          totalBytes += bytes;
+          if (totalBytes > BANDWIDTH_LIMIT) {
+            limitReached = true;
+            console.log(`[BANDWIDTH] 300KB hard limit exceeded (${totalBytes} bytes)`);
+          }
+        }
+      }
+    } catch {}
+  });
+
   page.setRequestInterception(true).catch(() => {});
   page.on('request', (req) => {
     try {
@@ -295,37 +277,48 @@ function initLeanResourceGuards(page, mainHost) {
       const type = req.resourceType();
       const host = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
 
-      // CRITICAL: Allow extension:// URLs (extension resources)
+      // Allow extension:// URLs
       if (url.startsWith('extension://') || url.startsWith('chrome-extension://')) {
         return req.continue();
       }
 
-      // Always allow main document
+      // Allow document + navigation
       if (req.isNavigationRequest() || type === 'document') return req.continue();
 
-      // Block all heavy types globally (including stylesheets)
-      if (type === 'image' || type === 'media' || type === 'font' || type === 'stylesheet') return req.abort();
+      // Block heavy assets ALWAYS (images, media, fonts, stylesheets)
+      if (type === 'image' || type === 'media' || type === 'font' || type === 'stylesheet') {
+        return req.abort();
+      }
 
-      // Allow analytics and extension scripts
+      // If bandwidth limit reached, block everything
+      if (limitReached) return req.abort();
+
+      // Allow minimal same-origin scripts for click handlers
       if (type === 'script') {
-        if (host === mainHost || isAnalytics(url)) return req.continue();
+        if (host === mainHost) {
+          if (sameOriginScriptCount < MAX_SAME_ORIGIN_SCRIPTS) {
+            sameOriginScriptCount++;
+            console.log(`[SCRIPT] Allowing same-origin script ${sameOriginScriptCount}/${MAX_SAME_ORIGIN_SCRIPTS}`);
+            return req.continue();
+          }
+          return req.abort();
+        }
+        // Only allow core analytics scripts (GA, GTM)
+        if (isAnalytics(url) && (url.includes('gtag') || url.includes('analytics.js') || url.includes('gtm.js'))) {
+          return req.continue();
+        }
         return req.abort();
       }
 
-      // Allow extension XHR/fetch and analytics (critical for data transmission)
+      // Allow analytics beacons (small XHR/fetch)
       if (type === 'xhr' || type === 'fetch') {
-        // Always allow same-origin (extension calls)
-        if (host === mainHost) return req.continue();
-        // Allow all analytics trackers
-        if (isAnalytics(url)) return req.continue();
-        // Block third-party services
+        if (host === mainHost) return req.abort(); // Block same-origin data calls
+        if (isAnalytics(url)) return req.continue(); // Allow tracker beacons
         return req.abort();
       }
 
-      // Block anything else third-party (except analytics)
-      if (host !== mainHost && !isAnalytics(url)) return req.abort();
-      
-      return req.continue();
+      // Block everything else
+      return req.abort();
     } catch {
       try { req.continue(); } catch {}
     }
@@ -1629,7 +1622,12 @@ app.post('/api/debug', (req, res) => {
 async function processAutomateJob(reqBody, jobId) {
   const sessionLogger = new SessionLogger(jobId);
   const sessionStartMs = Date.now();
-  const bandwidthTracker = createBandwidthTracker(sessionLogger);
+  
+  // Use debug-mode bandwidth tracker if debugMode enabled, otherwise use standard tracker
+  const debugMode = reqBody.debugMode || false;
+  const bandwidthTracker = debugMode 
+    ? createDebugBandwidthTracker(sessionLogger, debugMode)
+    : createBandwidthTracker(sessionLogger);
 
   let browser;
   let page;
@@ -1642,6 +1640,9 @@ async function processAutomateJob(reqBody, jobId) {
       searchKeyword,
       campaignType, // 'direct' or 'search'
       customReferrer, // Custom referrer from campaign settings
+      minPagesPerSession, // Min pages to visit
+      maxPagesPerSession, // Max pages to visit
+      debugMode: _debugMode, // Debug mode flag
       // Direct traffic params
       proxy,
       proxyUsername,
@@ -1879,7 +1880,7 @@ async function processAutomateJob(reqBody, jobId) {
       await new Promise(r => setTimeout(r, 2000));
       console.log(`[BROWSER API] ✓ Allowed 2s for GA scripts to fire`);
       
-      // User journey (if provided) else random browsing with multi-page chance
+      // User journey (if provided) else intelligent multi-page browsing
       if (userJourney && userJourney.length > 0) {
         for (const action of userJourney) {
           const { type, selector, url: actionUrl, text, delay } = action;
@@ -1891,7 +1892,7 @@ async function processAutomateJob(reqBody, jobId) {
               await page.type(selector, text, { delay: 100 });
               sessionLogger.log('JOURNEY', `Typed in: ${selector}`, 'success');
             } else if (type === 'navigate' && actionUrl) {
-              await page.goto(actionUrl, { waitUntil: 'networkidle2' });
+              await page.goto(actionUrl, { waitUntil: 'domcontentloaded' });
               sessionLogger.log('JOURNEY', `Navigated to: ${actionUrl}`, 'success');
             }
             if (delay) await new Promise(r => setTimeout(r, delay));
@@ -1901,22 +1902,25 @@ async function processAutomateJob(reqBody, jobId) {
         }
         sessionLogger.success('JOURNEY', 'Completed');
       } else {
-        await maybeMultiPageBrowse(page, clickedUrl, sessionLogger);
+        // Use intelligent navigation with min/max pages and bounce rate
+        const minPages = minPagesPerSession || 1;
+        const maxPages = maxPagesPerSession || 3;
+        await intelligentNavigate(page, null, bounceRate || 0, minPages, maxPages, sessionLogger);
       }
 
       // Dwell/bounce duration honoring frontend inputs
       const minSec = sessionDurationMin || 30;
       const maxSec = sessionDurationMax || 120;
-      const shouldBounce = (bounceRate || 0) > 0 && Math.random() < ((bounceRate || 0) / 100);
-      const durationSec = shouldBounce ? Math.floor(5 + Math.random() * 5) : Math.floor(minSec + Math.random() * (maxSec - minSec));
+      const shouldBounceSession = (bounceRate || 0) > 0 && Math.random() < ((bounceRate || 0) / 100);
+      const durationSec = shouldBounceSession ? Math.floor(5 + Math.random() * 5) : Math.floor(minSec + Math.random() * (maxSec - minSec));
       lastPlannedDurationSec = durationSec;
       await new Promise(r => setTimeout(r, durationSec * 1000));
       
       const actualDurationSec = Math.round((Date.now() - sessionStartMs) / 1000);
-      bandwidthTracker.report(clickedUrl, actualDurationSec);
+      const bandwidthReport = bandwidthTracker.report(clickedUrl, actualDurationSec);
       console.log('[BROWSER API] ✓ Session completed successfully (real browser)');
       const logs = sessionLogger.getLogs();
-      return { success: true, sessionId, clickedUrl, targetUrl: clickedUrl, method: 'browser_api_browser', logs, bandwidthBytes: bandwidthTracker.getTotalBytes(), actualDurationSec };
+      return { success: true, sessionId, clickedUrl, targetUrl: clickedUrl, method: 'browser_api_browser', logs, bandwidthBytes: bandwidthTracker.getTotalBytes(), actualDurationSec, bandwidthReport: debugMode ? bandwidthReport : undefined };
     }
     
     // ═══════════════════════════════════════════════════════════
@@ -1954,7 +1958,18 @@ async function processAutomateJob(reqBody, jobId) {
         
         sessionLogger.success('LUNA', 'Browser and page acquired for session continuation');
         
-        // Execute user journey or random behavior
+        // Site analysis on first visit (debug mode only)
+        let siteAnalysis = null;
+        if (debugMode) {
+          try {
+            sessionLogger.log('ANALYSIS', 'Debug mode enabled - analyzing site structure', 'info');
+            siteAnalysis = await analyzeSiteStructure(page, url, sessionLogger);
+          } catch (err) {
+            sessionLogger.warning('ANALYSIS', `Site analysis error: ${err.message}`);
+          }
+        }
+        
+        // Execute user journey or intelligent behavior
         if (userJourney && userJourney.length > 0) {
           sessionLogger.log('JOURNEY', 'Executing user actions', 'info');
           for (const action of userJourney) {
@@ -1967,7 +1982,7 @@ async function processAutomateJob(reqBody, jobId) {
                 await page.type(selector, text, { delay: 100 });
                 sessionLogger.log('JOURNEY', `Typed in: ${selector}`, 'success');
               } else if (type === 'navigate' && actionUrl) {
-                await page.goto(actionUrl, { waitUntil: 'networkidle2' });
+                await page.goto(actionUrl, { waitUntil: 'domcontentloaded' });
                 sessionLogger.log('JOURNEY', `Navigated to: ${actionUrl}`, 'success');
               }
               
@@ -1980,22 +1995,25 @@ async function processAutomateJob(reqBody, jobId) {
           }
           sessionLogger.success('JOURNEY', 'Completed');
         } else {
-          await maybeMultiPageBrowse(page, clickedUrl, sessionLogger);
+          // Use intelligent navigation with min/max pages and bounce rate
+          const minPages = minPagesPerSession || 1;
+          const maxPages = maxPagesPerSession || 3;
+          await intelligentNavigate(page, siteAnalysis, bounceRate || 0, minPages, maxPages, sessionLogger);
         }
         
         // Session duration honoring frontend inputs
         const minSec = sessionDurationMin || 30;
         const maxSec = sessionDurationMax || 120;
-        const shouldBounce = (bounceRate || 0) > 0 && Math.random() < ((bounceRate || 0) / 100);
-        const durationSec = shouldBounce ? Math.floor(5 + Math.random() * 5) : Math.floor(minSec + Math.random() * (maxSec - minSec));
+        const shouldBounceSession = (bounceRate || 0) > 0 && Math.random() < ((bounceRate || 0) / 100);
+        const durationSec = shouldBounceSession ? Math.floor(5 + Math.random() * 5) : Math.floor(minSec + Math.random() * (maxSec - minSec));
         lastPlannedDurationSec = durationSec;
         await new Promise(r => setTimeout(r, durationSec * 1000));
         
         const actualDurationSec = Math.round((Date.now() - sessionStartMs) / 1000);
-        bandwidthTracker.report(clickedUrl, actualDurationSec);
+        const bandwidthReport = bandwidthTracker.report(clickedUrl, actualDurationSec);
         sessionLogger.success('SESSION', 'Completed successfully');
         const logs = sessionLogger.getLogs();
-        return { success: true, sessionId, clickedUrl, targetUrl: clickedUrl, method: 'luna_headful_direct', logs, bandwidthBytes: bandwidthTracker.getTotalBytes(), actualDurationSec };
+        return { success: true, sessionId, clickedUrl, targetUrl: clickedUrl, method: 'luna_headful_direct', logs, bandwidthBytes: bandwidthTracker.getTotalBytes(), actualDurationSec, bandwidthReport: debugMode ? bandwidthReport : undefined };
       } else {
         sessionLogger.error('LUNA', `Navigation failed: ${result.error}`);
         const logs = sessionLogger.getLogs();

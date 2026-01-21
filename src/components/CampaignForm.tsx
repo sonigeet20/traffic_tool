@@ -40,6 +40,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
   const [plugins, setPlugins] = useState<Partial<BrowserPlugin>[]>([]);
   const [extensionId, setExtensionId] = useState<string>('');
   const [bounceRate, setBounceRate] = useState(30);
+  const [minPagesPerSession, setMinPagesPerSession] = useState(1);
+  const [maxPagesPerSession, setMaxPagesPerSession] = useState(3);
+  const [debugMode, setDebugMode] = useState(false);
   const [customReferrer, setCustomReferrer] = useState('');
   const [useSerpApi, setUseSerpApi] = useState(false);
   const [serpApiProvider, setSerpApiProvider] = useState('bright_data');
@@ -81,6 +84,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
       setSearchKeywords(campaign.search_keywords || []);
       setExtensionId(campaign.extension_crx_url || '');
       setBounceRate(campaign.bounce_rate || 30);
+      setMinPagesPerSession(campaign.min_pages_per_session || 1);
+      setMaxPagesPerSession(campaign.max_pages_per_session || 3);
+      setDebugMode(campaign.debug_mode || false);
       setCustomReferrer(campaign.custom_referrer || '');
       setUseSerpApi(campaign.use_serp_api || false);
       setSerpApiProvider(campaign.serp_api_provider || 'bright_data');
@@ -152,6 +158,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
           distribution_pattern: distributionPattern,
           sessions_per_hour: sessionsPerHour,
           bounce_rate: bounceRate,
+          min_pages_per_session: minPagesPerSession,
+          max_pages_per_session: maxPagesPerSession,
+          debug_mode: debugMode,
           traffic_source_distribution: trafficSourceDistribution,
           search_keywords: searchKeywords,
           extension_crx_url: extensionId || null,
@@ -199,6 +208,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
             distribution_pattern: distributionPattern,
             sessions_per_hour: sessionsPerHour,
             bounce_rate: bounceRate,
+            min_pages_per_session: minPagesPerSession,
+            max_pages_per_session: maxPagesPerSession,
+            debug_mode: debugMode,
             traffic_source_distribution: trafficSourceDistribution,
             search_keywords: searchKeywords,
             extension_crx_url: extensionId || null,
@@ -494,6 +506,62 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
                 />
                 <p className="mt-2 text-sm text-slate-400">
                   Percentage of users that will exit the site after 1-5 seconds (realistic bounce behavior)
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Min Pages Per Session
+                  </label>
+                  <input
+                    type="number"
+                    value={minPagesPerSession}
+                    onChange={(e) => setMinPagesPerSession(Math.max(1, parseInt(e.target.value) || 1))}
+                    min="1"
+                    max="10"
+                    required
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                  <p className="mt-2 text-sm text-slate-400">
+                    Minimum number of pages to visit per session (1-10)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Max Pages Per Session
+                  </label>
+                  <input
+                    type="number"
+                    value={maxPagesPerSession}
+                    onChange={(e) => setMaxPagesPerSession(Math.max(1, parseInt(e.target.value) || 1))}
+                    min="1"
+                    max="10"
+                    required
+                    className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                  />
+                  <p className="mt-2 text-sm text-slate-400">
+                    Maximum number of pages to visit per session (1-10)
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={debugMode}
+                    onChange={(e) => setDebugMode(e.target.checked)}
+                    className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-cyan-500"
+                  />
+                  <span className="text-sm font-medium text-blue-300">Enable Debug Mode</span>
+                </label>
+                <p className="mt-2 text-sm text-blue-300">
+                  When enabled: Bandwidth is calculated and tracked for this campaign launch only. Site analysis runs on first visit to find optimal navigation elements. Debug stats returned in session logs.
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  ⚠️ Production overhead: ZERO (debug tracking only runs when enabled)
                 </p>
               </div>
 

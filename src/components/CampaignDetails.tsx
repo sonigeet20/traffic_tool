@@ -188,6 +188,11 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       isSearchTraffic,
       sessionDurationMin: campaign.session_duration_min || 30,
       sessionDurationMax: campaign.session_duration_max || 120,
+      bounceRate: campaign.bounce_rate || 30,
+      minPagesPerSession: campaign.min_pages_per_session || 1,
+      maxPagesPerSession: campaign.max_pages_per_session || 3,
+      debugMode: campaign.debug_mode || false,
+      customReferrer: campaign.custom_referrer || '',
       useLunaProxySearch: false, // Default to false, will be set to true if conditions met
     };
 
