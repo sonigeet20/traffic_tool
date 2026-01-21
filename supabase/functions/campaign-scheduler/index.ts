@@ -330,7 +330,7 @@ async function executeHourlyBatch(
 
     const sessionDuration = Math.floor(Math.random() * (sessionDurationMax - sessionDurationMin + 1)) + sessionDurationMin;
 
-    await supabase.from('bot_sessions').insert({
+    const { error: insertError } = await supabase.from('bot_sessions').insert({
       id: sessionId,
       campaign_id: campaign.id,
       status: 'running',
@@ -342,9 +342,14 @@ async function executeHourlyBatch(
       referrer: trafficSource === 'search' ? `https://www.google.com/search?q=${searchKeyword}` : null,
       is_bounced: shouldBounce,
       bounce_duration_ms: bounceDuration,
-      session_duration_sec: sessionDuration,
+      expected_duration_ms: sessionDuration,
       started_at: new Date().toISOString(),
     });
+
+    if (insertError) {
+      console.error(`[SCHEDULER] Failed to insert session ${sessionId}:`, insertError.message);
+      continue;
+    }
 
     const waitTime = shouldBounce ? bounceDuration : sessionDuration;
 

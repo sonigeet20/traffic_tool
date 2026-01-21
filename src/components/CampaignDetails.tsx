@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
 import { ArrowLeft, Play, Pause, RefreshCw, Activity, Clock, CheckCircle, XCircle, TrendingUp } from 'lucide-react';
 import SessionLogs from './SessionLogs';
+import RealtimeLogs from './RealtimeLogs';
 
 type Campaign = Database['public']['Tables']['campaigns']['Row'];
 type BotSession = Database['public']['Tables']['bot_sessions']['Row'];
@@ -615,6 +616,9 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
         isLoading={executing}
         isExpanded={logsExpanded}
       />
+
+      {/* Real-time Logs */}
+      <RealtimeLogs campaignId={campaign.id} />
     </div>
   );
 }
