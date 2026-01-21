@@ -54,6 +54,7 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
   const [searchMode, setSearchMode] = useState<'browser_api' | 'luna_headful_direct'>('browser_api');
   const [currentTab, setCurrentTab] = useState<'basic' | 'geo' | 'journey' | 'plugins'>('basic');
   const [siteStructure, setSiteStructure] = useState<any>(null);
+  const [overrideProxySettings, setOverrideProxySettings] = useState(false);
 
   useEffect(() => {
     if (campaign) {
@@ -104,6 +105,9 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
       } else if (campaign.use_luna_headful_direct) {
         setSearchMode('luna_headful_direct');
       }
+      
+      // If campaign has custom proxy credentials, show override
+      setOverrideProxySettings(!!campaign.proxy_username);
       
       loadJourneys(campaign.id);
       loadPlugins(campaign.id);
@@ -663,126 +667,126 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
 
               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700 space-y-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div>
+                  <div className="flex-1">
                     <div className="text-white font-medium">Residential Proxies</div>
-                    <div className="text-slate-400 text-sm">Configure provider, credentials, and search routing. Fields stay visible for quick edits.</div>
+                    <div className="text-slate-400 text-sm">Using default proxy settings from Settings panel</div>
                   </div>
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useResidentialProxies}
-                      onChange={(e) => {
-                        setUseResidentialProxies(e.target.checked);
-                        if (e.target.checked) {
-                          setUseSerpApi(false);
-                        }
-                      }}
-                      disabled={useSerpApi}
-                      className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    />
-                    <span className="text-sm text-slate-200">Enable for traffic</span>
-                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setOverrideProxySettings(!overrideProxySettings)}
+                    className={`px-3 py-2 rounded-lg font-medium transition-all text-sm whitespace-nowrap ${
+                      overrideProxySettings
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    {overrideProxySettings ? '✓ Override Active' : 'Override for This Campaign'}
+                  </button>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Proxy Provider
-                    </label>
-                    <select
-                      value={proxyProvider}
-                      onChange={(e) => setProxyProvider(e.target.value)}
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    >
-                      <option value="luna">Luna Proxy (Recommended)</option>
-                      <option value="brightdata">Bright Data</option>
-                      <option value="smartproxy">SmartProxy</option>
-                      <option value="oxylabs">Oxylabs</option>
-                      <option value="geosurf">GeoSurf</option>
-                      <option value="default">Other/Custom</option>
-                    </select>
-                  </div>
-
-                  {proxyProvider === 'luna' && (
-                    <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-700/40 rounded-lg p-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-semibold text-green-300">Browser API for Search Traffic</div>
-                          <p className="text-xs text-slate-400">Use Bright Data Browser API for Google search (auto CAPTCHA solving). Luna used for direct navigation only.</p>
-                        </div>
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={useLunaProxySearch}
-                            onChange={(e) => setUseLunaProxySearch(e.target.checked)}
-                            className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-green-500"
-                          />
-                          <span className="text-sm text-slate-200">Enable</span>
+                {overrideProxySettings && (
+                  <>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proxy Provider
                         </label>
+                        <select
+                          value={proxyProvider}
+                          onChange={(e) => setProxyProvider(e.target.value)}
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        >
+                          <option value="luna">Luna Proxy (Recommended)</option>
+                          <option value="brightdata">Bright Data</option>
+                          <option value="smartproxy">SmartProxy</option>
+                          <option value="oxylabs">Oxylabs</option>
+                          <option value="geosurf">GeoSurf</option>
+                          <option value="default">Other/Custom</option>
+                        </select>
+                      </div>
+
+                      {proxyProvider === 'luna' && (
+                        <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-700/40 rounded-lg p-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-semibold text-green-300">Browser API for Search Traffic</div>
+                              <p className="text-xs text-slate-400">Use Bright Data Browser API for Google search (auto CAPTCHA solving). Luna used for direct navigation only.</p>
+                            </div>
+                            <label className="inline-flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={useLunaProxySearch}
+                                onChange={(e) => setUseLunaProxySearch(e.target.checked)}
+                                className="w-5 h-5 bg-slate-800 border-slate-600 rounded focus:ring-green-500"
+                              />
+                              <span className="text-sm text-slate-200">Enable</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proxy Username
+                        </label>
+                        <input
+                          type="text"
+                          value={proxyUsername}
+                          onChange={(e) => setProxyUsername(e.target.value)}
+                          placeholder="user-admin_X5otK"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proxy Password
+                        </label>
+                        <input
+                          type="password"
+                          value={proxyPassword}
+                          onChange={(e) => setProxyPassword(e.target.value)}
+                          placeholder="Enter password"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
                       </div>
                     </div>
-                  )}
-                </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Proxy Username
-                    </label>
-                    <input
-                      type="text"
-                      value={proxyUsername}
-                      onChange={(e) => setProxyUsername(e.target.value)}
-                      placeholder="user-admin_X5otK"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                  </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proxy Host
+                        </label>
+                        <input
+                          type="text"
+                          value={proxyHost}
+                          onChange={(e) => setProxyHost(e.target.value)}
+                          placeholder="pr.lunaproxy.com"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Proxy Password
-                    </label>
-                    <input
-                      type="password"
-                      value={proxyPassword}
-                      onChange={(e) => setProxyPassword(e.target.value)}
-                      placeholder="Enter password"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                  </div>
-                </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proxy Port
+                        </label>
+                        <input
+                          type="text"
+                          value={proxyPort}
+                          onChange={(e) => setProxyPort(e.target.value)}
+                          placeholder="12233"
+                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
+                        />
+                      </div>
+                    </div>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Proxy Host
-                    </label>
-                    <input
-                      type="text"
-                      value={proxyHost}
-                      onChange={(e) => setProxyHost(e.target.value)}
-                      placeholder="pr.lunaproxy.com"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">
-                      Proxy Port
-                    </label>
-                    <input
-                      type="text"
-                      value={proxyPort}
-                      onChange={(e) => setProxyPort(e.target.value)}
-                      placeholder="12233"
-                      className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <p className="text-slate-400 text-xs">
-                  Credentials stay editable even if residential routing is toggled off. We will only apply the proxy when the toggle is on.
-                </p>
+                    <p className="text-slate-400 text-xs">
+                      These override settings will be used only for this campaign. Default settings from Settings panel will be used for other campaigns.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="space-y-3 bg-slate-900 rounded-lg p-4 border border-slate-700">
