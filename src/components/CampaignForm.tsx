@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import type { Database } from '../lib/database.types';
 import JourneyBuilder from './JourneyBuilder';
 import PluginConfig from './PluginConfig';
+import IntelligentTrafficConfig from './IntelligentTrafficConfig';
 import { Save, X, Loader2 } from 'lucide-react';
 
 type Campaign = Database['public']['Tables']['campaigns']['Row'];
@@ -52,6 +53,7 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
   const [useLunaHeadfulDirect, setUseLunaHeadfulDirect] = useState(false);
   const [searchMode, setSearchMode] = useState<'browser_api' | 'luna_headful_direct'>('browser_api');
   const [currentTab, setCurrentTab] = useState<'basic' | 'geo' | 'journey' | 'plugins'>('basic');
+  const [siteStructure, setSiteStructure] = useState<any>(null);
 
   useEffect(() => {
     if (campaign) {
@@ -86,6 +88,7 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
       setBounceRate(campaign.bounce_rate || 30);
       setMinPagesPerSession(campaign.min_pages_per_session || 1);
       setMaxPagesPerSession(campaign.max_pages_per_session || 3);
+      setSiteStructure(campaign.site_structure || null);
       setDebugMode(campaign.debug_mode || false);
       setCustomReferrer(campaign.custom_referrer || '');
       setUseSerpApi(campaign.use_serp_api || false);
@@ -171,6 +174,8 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
           use_luna_proxy_search: useLunaProxySearch,
           campaign_type: campaignType,
           use_luna_headful_direct: useLunaHeadfulDirect,
+          site_structure: siteStructure,
+          site_structure_traced_at: siteStructure ? new Date().toISOString() : null,
           updated_at: new Date().toISOString(),
         };
         console.log('[SAVE DEBUG] Full update payload:', updateData);
@@ -221,6 +226,8 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
             use_luna_proxy_search: useLunaProxySearch,
             campaign_type: campaignType,
             use_luna_headful_direct: useLunaHeadfulDirect,
+            site_structure: siteStructure,
+            site_structure_traced_at: siteStructure ? new Date().toISOString() : null,
           })
           .select()
           .single();
@@ -582,6 +589,18 @@ export default function CampaignForm({ campaign, onSave, onCancel }: CampaignFor
                 <p className="mt-1 text-xs text-slate-400">
                   Common values: <code className="text-cyan-400">https://www.google.com/</code> for organic search, <code className="text-cyan-400">https://www.facebook.com/</code> for social
                 </p>
+              </div>
+
+              <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/30 rounded-xl p-6">
+                <IntelligentTrafficConfig
+                  url={targetUrl}
+                  isLoading={false}
+                  existingStructure={siteStructure}
+                  onAnalysisComplete={(structure) => {
+                    setSiteStructure(structure);
+                    console.log('[SITE STRUCTURE] Analysis complete:', structure);
+                  }}
+                />
               </div>
             </div>
           )}

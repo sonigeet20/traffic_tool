@@ -118,7 +118,7 @@ function shouldBounce(bounceRate) {
 // ════════════════════════════════════════════════════════════════════════
 // 3. INTELLIGENT MULTI-PAGE NAVIGATION
 // ════════════════════════════════════════════════════════════════════════
-async function intelligentNavigate(page, siteAnalysis, bounceRate, minPages, maxPages, sessionLogger) {
+async function intelligentNavigate(page, siteAnalysis, bounceRate, minPages, maxPages, sessionLogger, preMapdSiteStructure = null) {
   try {
     // Always scroll a bit on the current page
     const scrolls = Math.floor(Math.random() * 3) + 1;
@@ -142,12 +142,34 @@ async function intelligentNavigate(page, siteAnalysis, bounceRate, minPages, max
     const pagesToVisit = minPages + Math.floor(Math.random() * (maxPages - minPages + 1));
     sessionLogger.log('BEHAVIOR', `Will visit ${pagesToVisit} total pages (min: ${minPages}, max: ${maxPages})`, 'info');
     
-    // If we have site analysis, use intelligent link selection
-    if (siteAnalysis && siteAnalysis.navLinks && siteAnalysis.navLinks.length > 0) {
-      sessionLogger.log('BEHAVIOR', 'Using intelligent link selection from site analysis', 'info');
+    // Use pre-mapped site structure if available
+    const navPages = preMapdSiteStructure?.navigablePages || (siteAnalysis?.navLinks || []);
+    
+    if (preMapdSiteStructure && preMapdSiteStructure.navigablePages && preMapdSiteStructure.navigablePages.length > 0) {
+      sessionLogger.log('BEHAVIOR', `Using pre-mapped site structure with ${preMapdSiteStructure.navigablePages.length} pages`, 'info');
       
       for (let i = 0; i < pagesToVisit - 1; i++) {
         try {
+          const randomPage = preMapdSiteStructure.navigablePages[Math.floor(Math.random() * preMapdSiteStructure.navigablePages.length)];
+          sessionLogger.log('NAVIGATION', `Navigating to: ${randomPage}`, 'info');
+          await page.goto(randomPage, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          
+          // Random think time
+          const thinkTime = 3000 + Math.random() * 7000;
+          await new Promise(r => setTimeout(r, thinkTime));
+          
+          // Random scroll
+          if (Math.random() > 0.3) {
+            await page.evaluate(() => window.scrollBy(0, window.innerHeight / 3));
+            await new Promise(r => setTimeout(r, 500 + Math.random() * 1500));
+          }
+        } catch (err) {
+          sessionLogger.warning('NAVIGATION', `Failed to navigate: ${err.message}`);
+          break;
+        }
+      }
+    } else if (siteAnalysis && siteAnalysis.navLinks && siteAnalysis.navLinks.length > 0) {
+      sessionLogger.log('BEHAVIOR', 'Using intelligent link selection from site analysis', 'info');
           // Prefer links with keywords (page, post, article, category, etc.)
           const weightedLinks = siteAnalysis.navLinks.map(link => ({
             ...link,

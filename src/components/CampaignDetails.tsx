@@ -344,6 +344,16 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       geoLocation: payload.geoLocation
     });
 
+    // Add site structure if available
+    if (campaign.site_structure) {
+      payload.siteStructure = campaign.site_structure;
+      console.log('[DEBUG] Site structure passed to backend:', {
+        navigablePagesCount: campaign.site_structure?.navigablePages?.length || 0,
+        formPagesCount: campaign.site_structure?.formPages?.length || 0,
+        confidence: campaign.site_structure?.confidence || 0
+      });
+    }
+
     fetch('http://traffic-tool-alb-681297197.us-east-1.elb.amazonaws.com:3000/api/automate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

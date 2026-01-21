@@ -1643,6 +1643,7 @@ async function processAutomateJob(reqBody, jobId) {
       minPagesPerSession, // Min pages to visit
       maxPagesPerSession, // Max pages to visit
       debugMode: _debugMode, // Debug mode flag
+      siteStructure, // Pre-mapped website structure
       // Direct traffic params
       proxy,
       proxyUsername,
@@ -1905,7 +1906,7 @@ async function processAutomateJob(reqBody, jobId) {
         // Use intelligent navigation with min/max pages and bounce rate
         const minPages = minPagesPerSession || 1;
         const maxPages = maxPagesPerSession || 3;
-        await intelligentNavigate(page, null, bounceRate || 0, minPages, maxPages, sessionLogger);
+        await intelligentNavigate(page, null, bounceRate || 0, minPages, maxPages, sessionLogger, siteStructure);
       }
 
       // Dwell/bounce duration honoring frontend inputs
@@ -1998,7 +1999,7 @@ async function processAutomateJob(reqBody, jobId) {
           // Use intelligent navigation with min/max pages and bounce rate
           const minPages = minPagesPerSession || 1;
           const maxPages = maxPagesPerSession || 3;
-          await intelligentNavigate(page, siteAnalysis, bounceRate || 0, minPages, maxPages, sessionLogger);
+          await intelligentNavigate(page, siteAnalysis, bounceRate || 0, minPages, maxPages, sessionLogger, siteStructure);
         }
         
         // Session duration honoring frontend inputs
