@@ -41,13 +41,18 @@ export default function IntelligentTrafficConfig({
     setError('');
 
     try {
-      // Simulate site analysis - in production, this would be a backend endpoint
-      // that uses Puppeteer to trace the website
-      const response = await fetch('/api/analyze-site-structure', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
+      // Call Supabase edge function for site analysis
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-site-structure`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ url }),
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`Analysis failed: ${response.statusText}`);
@@ -57,6 +62,7 @@ export default function IntelligentTrafficConfig({
       setStructure(data);
       onAnalysisComplete(data);
     } catch (err) {
+      console.warn('Site analysis failed, using fallback:', err);
       setError(err instanceof Error ? err.message : 'Failed to analyze website');
       
       // Fallback simulation for demo

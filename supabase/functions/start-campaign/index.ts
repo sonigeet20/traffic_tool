@@ -54,11 +54,14 @@ Deno.serve(async (req: Request) => {
       },
     });
 
+    let schedulerResult = null;
     if (!schedulerResponse.ok) {
-      console.error('Failed to trigger scheduler:', await schedulerResponse.text());
+      const errorText = await schedulerResponse.text();
+      console.error('Failed to trigger scheduler:', errorText);
+      schedulerResult = { error: errorText };
+    } else {
+      schedulerResult = await schedulerResponse.json();
     }
-
-    const schedulerResult = await schedulerResponse.json();
 
     return new Response(
       JSON.stringify({
