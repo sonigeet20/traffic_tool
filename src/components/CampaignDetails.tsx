@@ -51,7 +51,7 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
         .from('serp_configs')
         .select('*')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('[DEBUG loadBrowserApiConfig] Error fetching config:', error.message);
@@ -355,7 +355,7 @@ export default function CampaignDetails({ campaign, onBack, onEdit, onRefresh }:
       });
     }
 
-    fetch('http://traffic-tool-alb-681297197.us-east-1.elb.amazonaws.com:3000/api/automate', {
+    fetch('https://traffic-tool-alb-681297197.us-east-1.elb.amazonaws.com:3000/api/automate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
